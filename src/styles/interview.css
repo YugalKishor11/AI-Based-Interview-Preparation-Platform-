@@ -1,0 +1,110 @@
+/* Live Interview Room Styles */
+.room-layout {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(1000px 600px at 50% -10%, rgb(var(--c-primary) / 0.16), transparent 70%),
+    rgb(var(--c-bg));
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.room-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 24px;
+}
+
+/* Fluid Wave Canvas */
+.waveform-canvas-container {
+  width: 100%;
+  max-width: 600px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.waveform-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* Live Room Dock */
+.room-dock {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--glass-3);
+  backdrop-filter: blur(36px) saturate(190%);
+  -webkit-backdrop-filter: blur(36px) saturate(190%);
+  border: 1px solid rgb(255 255 255 / 0.20);
+  border-radius: var(--r-pill);
+  box-shadow: 0 20px 50px -10px rgb(0 0 0 / 0.60);
+  z-index: 50;
+}
+
+/* Mic Control Button */
+.mic-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mic-btn.active {
+  background: linear-gradient(135deg, rgb(var(--c-success)), rgb(var(--c-secondary)));
+  color: #fff;
+  box-shadow: 0 0 30px rgb(var(--c-success) / 0.60);
+}
+
+.mic-btn.muted {
+  background: rgb(var(--c-danger) / 0.20);
+  color: rgb(var(--c-danger));
+  border: 1px solid rgb(var(--c-danger) / 0.40);
+}
+
+/* Connection Status Dot */
+.conn-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.conn-dot.connected {
+  background-color: rgb(var(--c-success));
+  box-shadow: 0 0 10px rgb(var(--c-success));
+}
+
+.conn-dot.reconnecting {
+  background-color: rgb(var(--c-warning));
+  box-shadow: 0 0 10px rgb(var(--c-warning));
+  animation: pulse 1s infinite;
+}
+
+.conn-dot.disconnected {
+  background-color: rgb(var(--c-danger));
+}

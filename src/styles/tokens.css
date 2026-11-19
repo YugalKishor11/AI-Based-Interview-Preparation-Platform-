@@ -1,0 +1,121 @@
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: 7 11 20;
+  --c-surface: 15 22 38;
+  --c-elevated: 22 32 54;
+  --c-overlay: 3 6 12;
+  --c-primary: 139 92 246;
+  --c-primary-hover: 124 77 232;
+  --c-secondary: 56 189 248;
+  --c-success: 52 211 153;
+  --c-warning: 251 191 36;
+  --c-danger: 248 113 113;
+  --c-pink: 244 114 182;
+  --c-text: 248 250 252;
+  --c-text-2: 203 213 225;
+  --c-text-muted: 148 163 184;
+  --c-border: 148 163 184;
+  --border-a: 0.14;
+  --border-strong-a: 0.28;
+
+  --glass-1: rgb(22 32 54 / 0.52);
+  --glass-2: rgb(22 32 54 / 0.46);
+  --glass-3: rgb(15 23 42 / 0.70);
+  --glass-border: rgb(255 255 255 / 0.14);
+  --glass-highlight: rgb(255 255 255 / 0.18);
+
+  --spec: inset 0 1px 1px rgb(255 255 255 / 0.42), inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-lift: 0 24px 48px -12px rgb(0 0 0 / 0.55), 0 8px 16px -4px rgb(0 0 0 / 0.35);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.30);
+  --shadow-2: 0 6px 20px rgb(0 0 0 / 0.30);
+  --shadow-3: 0 18px 48px rgb(0 0 0 / 0.42);
+
+  --orb-violet: rgb(139 92 246 / 0.55);
+  --orb-sky: rgb(56 189 248 / 0.40);
+  --orb-pink: rgb(244 114 182 / 0.26);
+  --orb-green: rgb(52 211 153 / 0.22);
+
+  --ring: 0 0 0 3px rgb(139 92 246 / 0.45);
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  --c-bg: 241 245 251;
+  --c-surface: 255 255 255;
+  --c-elevated: 236 242 250;
+  --c-overlay: 15 23 42;
+  --c-primary: 124 58 237;
+  --c-primary-hover: 109 40 217;
+  --c-secondary: 2 132 199;
+  --c-success: 4 120 87;
+  --c-warning: 180 83 9;
+  --c-danger: 190 18 60;
+  --c-pink: 190 24 93;
+  --c-text: 15 23 42;
+  --c-text-2: 51 65 85;
+  --c-text-muted: 71 85 105;
+  --c-border: 15 23 42;
+  --border-a: 0.10;
+  --border-strong-a: 0.22;
+
+  --glass-1: rgb(255 255 255 / 0.72);
+  --glass-2: rgb(255 255 255 / 0.66);
+  --glass-3: rgb(255 255 255 / 0.86);
+  --glass-border: rgb(255 255 255 / 0.85);
+  --glass-highlight: rgb(255 255 255 / 0.95);
+
+  --spec: inset 0 1px 1.5px rgb(255 255 255 / 0.95), inset 0 0 0 1px rgb(255 255 255 / 0.50);
+  --shadow-lift: 0 20px 40px -12px rgb(15 23 42 / 0.14), 0 4px 12px -2px rgb(15 23 42 / 0.07);
+  --shadow-1: 0 1px 2px rgb(15 23 42 / 0.08);
+  --shadow-2: 0 6px 20px rgb(15 23 42 / 0.10);
+  --shadow-3: 0 18px 48px rgb(15 23 42 / 0.16);
+
+  --orb-violet: rgb(124 58 237 / 0.30);
+  --orb-sky: rgb(2 132 199 / 0.24);
+  --orb-pink: rgb(219 39 119 / 0.14);
+  --orb-green: rgb(5 150 105 / 0.14);
+
+  --ring: 0 0 0 3px rgb(124 58 237 / 0.35);
+}
+
+:root {
+  --font-head: 'Manrope Variable', 'Manrope', system-ui, sans-serif;
+  --font-ui: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+  --fs-3xl: clamp(2rem, 1.4rem + 2vw, 2.75rem);
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 40px;
+  --sp-8: 48px;
+  --sp-9: 64px;
+  --sp-10: 80px;
+  --sp-11: 96px;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 20px;
+  --r-2xl: 24px;
+  --r-3xl: 28px;
+  --r-pill: 9999px;
+
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-moderate: 280ms;
+  --dur-slow: 480ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}

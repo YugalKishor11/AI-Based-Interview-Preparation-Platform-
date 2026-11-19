@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-effects="full">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>PrepSphere — Premium AI Interview Preparation</title>
+    <meta name="description" content="Master job interviews by voice with virtual AI interviewers. Evidence-linked feedback, 7-day drill plans, and real-time audio coaching." />
+    <meta name="theme-color" content="#070b14" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="PrepSphere — Premium AI Interview Preparation" />
+    <meta property="og:description" content="Master job interviews by voice with virtual AI interviewers. Evidence-linked feedback and targeted drill plans." />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Pre-hydration Theme & Effects Governor script to prevent FOUC -->
+    <script>
+      (function() {
+        try {
+          // 1. Theme
+          var storedTheme = localStorage.getItem('prepsphere_theme');
+          var theme = storedTheme;
+          if (!theme || theme === 'system') {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', theme);
+          var metaTheme = document.querySelector('meta[name="theme-color"]');
+          if (metaTheme) {
+            metaTheme.setAttribute('content', theme === 'dark' ? '#070b14' : '#f1f5fb');
+          }
+
+          // 2. Effects Governor
+          var storedEffects = localStorage.getItem('prepsphere_effects');
+          var effects = storedEffects || 'full';
+          if (effects === 'auto' || !storedEffects) {
+            var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            var prefersReducedTransparency = window.matchMedia('(prefers-reduced-transparency: reduce)').matches;
+            var isLowSpec = (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
+                            (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+                            (navigator.connection && navigator.connection.saveData);
+            if (prefersReducedTransparency) {
+              effects = 'reduced';
+            } else if (isLowSpec) {
+              effects = 'lite';
+            } else {
+              effects = 'full';
+            }
+          }
+          document.documentElement.setAttribute('data-effects', effects);
+        } catch (e) {
+          console.error('Pre-hydration script error', e);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
