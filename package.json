@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "check:contracts": "node scripts/check-contracts.js",
+    "check:secrets": "node scripts/check-secrets.js",
     "screenshots": "node scripts/capture-screenshots.js",
     "analyze": "vite build --mode analyze"
   },

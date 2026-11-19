@@ -170,3 +170,58 @@ Status: Gate A Complete (All Milestones M0 through M13 green)
 - **End-to-End Tests**: Playwright candidate journey test + axe-core WCAG AA accessibility audit.
 - **Screenshots**: 114 screenshots captured in `docs/screenshots/` across 5 viewports (360, 768, 1024, 1440, 1920) in both dark & light themes, with ZERO horizontal overflow warnings.
 - **Bundle Size**: Initial JS on landing route is ~146.5 kB gzip (well under the 180 kB budget).
+
+---
+
+## Version: Backend Foundation v1.0 (PROMPT 2: BACKEND ON SUPABASE)
+Date: 2026-11-19
+Status: Backend Complete & Verified (Milestones B0 through B5 green, Gate B Ready)
+
+### B0: Shared Contracts & Drift Prevention
+- Canonical Zod schema definitions maintained in `src/data/contracts/index.ts` (39 contracts covering all entities and function payloads).
+- Re-exported for Deno Edge Functions in `supabase/functions/_shared/contracts/index.ts`.
+- Automated drift verification script `scripts/check-contracts.js` wired into `npm run check:contracts`. Exits with code 0.
+
+### B1: Database Migrations, RLS Policies, Storage & Seeds
+- `supabase/config.toml`: Supabase CLI configuration (ports 54321/54322/54323, Auth settings, Storage limits).
+- `supabase/migrations/20261119000001_initial_schema.sql`: 15 relational tables with enums, high-performance indexes, and an automated profile creation trigger on `auth.users` insert.
+- `supabase/migrations/20261119000002_rls_policies.sql`: Strict Row Level Security (RLS) on all 15 tables with default-deny, `auth.uid() = user_id` candidate isolation, public read on personas and question bank, and service-role-only access on security-sensitive tables (`rate_limits`, `idempotency_keys`, `ai_usage_ledger`, `audit_logs`).
+- `supabase/migrations/20261119000003_storage_buckets.sql`: Private `resumes` (5MB limit) and `recordings` (25MB limit) buckets with path isolation policies `(storage.foldername(name))[1] = auth.uid()::text`.
+- `supabase/migrations/20261119000004_atomic_credits_debit.sql`: Concurrency-safe atomic debit function with row-level locks (`SELECT ... FOR UPDATE`), atomic grant function, and database retention cleanup function.
+- `supabase/seed.sql`: Seed data for 4 interviewer personas (Aanya Rao, Meera Kapoor, Rohan Mehta, Daniel Brooks) and 60 curated questions across 8 disciplines.
+
+### B2: Cross-Cutting Middleware & LlmClient (`supabase/functions/_shared/`)
+- `cors.ts`: Dynamic origin validation checking `ALLOWED_ORIGINS` from environment. Rejects `*` wildcard in production. Handles `OPTIONS` preflight with 200/204 response.
+- `securityHeaders.ts`: Strict headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, `Cache-Control: no-store`).
+- `error.ts`: Standard error classes (`AppError`, `BadRequestError`, `ValidationError`, `UnauthorizedError`, `ForbiddenError`, `NotFoundError`, `RateLimitError`, `InsufficientCreditsError`). Formats responses according to `ErrorEnvelopeSchema` (`{ error: { code, message, requestId, retryAfter? } }`).
+- `logger.ts`: Structured JSON logging scrubbing `transcript`, `dialogue`, `resumeText`, `token`, `password`, and `authorization` headers.
+- `auth.ts`: Validates bearer tokens with Supabase Auth, extracting `user_id`. Provides `requireServiceRoleAuth` for internal-only endpoints.
+- `rateLimit.ts`: Token bucket algorithm querying `rate_limits` table with `Retry-After` calculation. Includes in-memory fallback.
+- `idempotency.ts`: Checks `Idempotency-Key` header against `idempotency_keys` table to return cached responses and attach `Idempotent-Replay: true`.
+- `supabaseClient.ts`: Generates user-scoped client (RLS applied) or service-role client.
+- `handler.ts`: Reusable execution wrapper handling CORS, request IDs, execution timing, and uniform error trapping.
+- `llm/llmClient.ts`: Multi-vendor JSON generation (`generateJson<T>(schema, prompt, opts)`) with low temperature ($0.1-0.2$), schema validation with retry, exponential backoff, spend cap kill switch, and zero content logged into `ai_usage_ledger`.
+
+### B3: Edge Functions Catalog (13 Functions)
+1. `session-token`: Mints short-lived scoped voice credentials; checks credits ($\ge 20$), consent, and rate limit. Never leaks master provider keys.
+2. `plan-interview`: P1 planner; schema validation, LlmClient invocation, persists plan and session to database. Supports `Idempotency-Key`.
+3. `next-turn`: P3 follow-up decision; enforces time remaining, role, topic, difficulty; winds down gracefully when $<90$s remain.
+4. `evaluate-answer`: P4 answer evaluator; verifies verbatim quote match in candidate transcript (`quoteVerified`), scores rubrics 0-5.
+5. `generate-report`: P5 synthesizer + P6 drill plan; idempotent per session, generates 7-day drill plan, persists report.
+6. `progress-snapshot`: Rule-based trend analytics; computes moving averages, streak, weakest dimension, and recommended practice topic.
+7. `parse-resume`: Sanitizes untrusted resume text ($\le 5$MB, PDF/DOCX/TXT), extracts tech skills and neutral summary without subjective bias.
+8. `report-dispute`: Candidate score dispute filing; rate-limited (3/day), persists dispute with status `received`.
+9. `export-data`: GDPR data export bundle gathering all candidate records with signed 24h expiration.
+10. `delete-account`: Permanent erasure across all DB tables, storage buckets, and auth user; records content-free audit entry.
+11. `retention-sweep`: Service-role only scheduled sweep; safely deletes expired Storage objects and database rows.
+12. `credits-debit`: Service-role only wrapper calling `atomic_credits_debit` with row locks.
+13. `health`: Public liveness and DB dependency check; zero secrets in response.
+
+### B4: Automated Verification & Security Testing
+- **Unit Tests**: 36 passed across 4 test suites (`src/features/room/roomReducer.test.ts`, `src/data/contracts/contracts.test.ts`, `src/data/mock/repos.test.ts`, `tests/backend.test.ts`).
+- **Contract Drift**: `npm run check:contracts` verified 0 drift across 39 contracts.
+- **Secret Leak Grep**: `npm run check:secrets` verified 0 service-role keys or AI provider secrets in `src/` and `dist/`.
+- **TypeScript**: `npm run typecheck` passed with 0 errors (`strict: true`).
+- **ESLint**: `npm run lint` passed with 0 errors.
+- **Production Build**: `npm run build` succeeded in 7.51s (initial JS ~146.5 kB gzip).
+
