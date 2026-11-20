@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { GlassCard } from '../../shared/ui/GlassCard';
 import { RgbBorder } from '../../shared/ui/RgbBorder';
 import { Button } from '../../shared/ui/Button';
@@ -27,6 +27,8 @@ import {
 
 export const DeviceCheckPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const personaId = searchParams.get('personaId') || localStorage.getItem('prepsphere_selected_persona_id') || 'p4';
 
   const {
     stream,
@@ -102,7 +104,7 @@ export const DeviceCheckPage: React.FC = () => {
   const isReady = permissionState === 'granted' && speakerTested;
 
   const handleLaunchLive = () => {
-    navigate('/app/interview/live-101/live');
+    navigate(`/app/interview/live-101/live?personaId=${personaId}`);
   };
 
   return (
@@ -124,7 +126,7 @@ export const DeviceCheckPage: React.FC = () => {
       {permissionState === 'denied' && (
         <PermissionDeniedGuide
           onRetry={requestPermission}
-          onUseTyped={() => navigate('/app/interview/live-101/live')}
+          onUseTyped={() => navigate(`/app/interview/live-101/live?personaId=${personaId}`)}
         />
       )}
 
@@ -323,7 +325,7 @@ export const DeviceCheckPage: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => navigate('/app/interview/live-101/live')}
+              onClick={() => navigate(`/app/interview/live-101/live?personaId=${personaId}`)}
               className="w-full text-center text-xs text-txt-muted hover:text-txt py-1"
             >
               Skip device test & continue with typed answers

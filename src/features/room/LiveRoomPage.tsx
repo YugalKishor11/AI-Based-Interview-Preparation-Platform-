@@ -1,5 +1,5 @@
 import React, { useReducer, useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { roomReducer, initialRoomContext } from './roomReducer';
 import { VoiceOrb, VoiceOrbState } from '../../shared/ui/VoiceOrb';
 import { FluidWave } from '../../shared/ui/FluidWave';
@@ -11,6 +11,8 @@ import { CodePanel } from './CodePanel';
 import { useMicStream } from '../../shared/hooks/useMicStream';
 import { useAudioLevel } from '../../shared/hooks/useAudioLevel';
 import { SEED_PERSONAS } from '../../data/mock/seed';
+import { ttsService } from '../../shared/audio/ttsService';
+import { getVoiceConfig, VOICE_REGISTRY } from '../../shared/audio/voiceRegistry';
 import {
   Mic,
   MicOff,
@@ -26,6 +28,7 @@ import {
   RotateCcw,
   Wifi,
   FileText,
+  Volume2,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../shared/ui/Dialog';
 
@@ -49,8 +52,16 @@ const SCRIPTED_QUESTIONS = [
 
 export const LiveRoomPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [context, dispatch] = useReducer(roomReducer, initialRoomContext);
-  const interviewer = SEED_PERSONAS[3]; // Daniel Brooks
+
+  const initialPersonaId =
+    searchParams.get('personaId') ||
+    localStorage.getItem('prepsphere_selected_persona_id') ||
+    'p4';
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>(initialPersonaId);
+  const interviewer = SEED_PERSONAS.find((p) => p.id === selectedPersonaId) || SEED_PERSONAS[3];
+  const voiceConfig = getVoiceConfig(selectedPersonaId);
 
   // Audio pipeline
   const { analyserNode, requestPermission, stop } = useMicStream(true);
@@ -64,6 +75,32 @@ export const LiveRoomPage: React.FC = () => {
   const [sideView, setSideView] = useState<'transcript' | 'code' | 'notes'>('code');
 
   const currentQ = SCRIPTED_QUESTIONS[context.currentQuestionIndex] || SCRIPTED_QUESTIONS[0];
+
+  const handleVoiceChange = (newPersonaId: string) => {
+    setSelectedPersonaId(newPersonaId);
+    const newVoice = getVoiceConfig(newPersonaId);
+    try {
+      localStorage.setItem('prepsphere_selected_persona_id', newPersonaId);
+      localStorage.setItem('prepsphere_selected_voice_id', newVoice.id);
+    } catch {}
+
+    // Immediately stop ongoing speech and switch
+    ttsService.stop();
+    if (context.state === 'interviewer_speaking') {
+      ttsService.speak(currentQ.text, newVoice.id, {
+        onEnd: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
+        onError: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
+      });
+    }
+  };
+
+  const handleReplayQuestion = () => {
+    dispatch({ type: 'START_INTERVIEW' });
+    ttsService.speak(currentQ.text, voiceConfig.id, {
+      onEnd: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
+      onError: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
+    });
+  };
 
   // Map room state to Voice Orb state
   const orbState: VoiceOrbState =
@@ -86,9 +123,7 @@ export const LiveRoomPage: React.FC = () => {
   // Barge-in detection: if interviewer is speaking and candidate speaks loudly, trigger BARGE_IN
   useEffect(() => {
     if (context.state === 'interviewer_speaking' && audioLevel > 0.25) {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
+      ttsService.stop();
       dispatch({ type: 'BARGE_IN' });
     }
   }, [context.state, audioLevel]);
@@ -98,32 +133,22 @@ export const LiveRoomPage: React.FC = () => {
     let cancel = false;
     const speakQuestion = async () => {
       dispatch({ type: 'START_INTERVIEW' });
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(currentQ.text);
-        u.rate = 1.0;
-        u.onend = () => {
+      await ttsService.speak(currentQ.text, voiceConfig.id, {
+        onEnd: () => {
           if (!cancel) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        };
-        u.onerror = () => {
+        },
+        onError: () => {
           if (!cancel) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        };
-        window.speechSynthesis.speak(u);
-      } else {
-        setTimeout(() => {
-          if (!cancel) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        }, 3000);
-      }
+        },
+      });
     };
 
     speakQuestion();
     return () => {
       cancel = true;
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
+      ttsService.stop();
     };
-  }, [context.currentQuestionIndex, currentQ.text]);
+  }, [context.currentQuestionIndex, currentQ.text, selectedPersonaId, voiceConfig.id]);
 
   // Spacebar push-to-talk handler
   useEffect(() => {
@@ -181,10 +206,26 @@ export const LiveRoomPage: React.FC = () => {
       <header className="h-14 px-6 border-b border-border/15 bg-surface/70 backdrop-blur-md flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <Badge variant="demo">Demo Simulation</Badge>
-          <span className="text-xs font-semibold text-txt hidden sm:inline">
-            Virtual AI Interviewer: <strong>{interviewer.name}</strong>
-          </span>
-          <span className="text-xs text-txt-muted">
+          <div className="flex items-center gap-1.5 bg-surface/80 border border-border/25 px-2.5 py-1 rounded-lg">
+            <Volume2 className="w-3.5 h-3.5 text-secondary shrink-0" />
+            <span className="text-xs text-txt-muted hidden sm:inline">Voice:</span>
+            <select
+              value={selectedPersonaId}
+              onChange={(e) => handleVoiceChange(e.target.value)}
+              className="text-xs font-semibold bg-transparent border-0 text-txt focus:ring-0 focus:outline-none cursor-pointer"
+              title="Change interviewer voice live"
+            >
+              {SEED_PERSONAS.map((p) => {
+                const v = getVoiceConfig(p.id);
+                return (
+                  <option key={p.id} value={p.id} className="bg-surface text-txt">
+                    {p.name} ({p.voiceGender === 'female' ? 'Female' : 'Male'} · {p.style})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <span className="text-xs text-txt-muted hidden md:inline">
             Question {context.currentQuestionIndex + 1} of {SCRIPTED_QUESTIONS.length}
           </span>
         </div>
@@ -223,7 +264,17 @@ export const LiveRoomPage: React.FC = () => {
                   <span className="text-[10px] font-bold tracking-wider text-secondary uppercase">
                     Current Question · Staff System Design
                   </span>
-                  <Badge variant="ai">Live Probing</Badge>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleReplayQuestion}
+                      className="text-[11px] font-semibold text-primary hover:text-primary-hover flex items-center gap-1 px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/20 transition-colors"
+                      title="Replay audio in currently selected voice"
+                    >
+                      <Volume2 className="w-3 h-3" /> Replay in {interviewer.name.split(' ')[0]}'s Voice
+                    </button>
+                    <Badge variant="ai">Live Probing</Badge>
+                  </div>
                 </div>
                 <h2 className="text-base font-bold text-txt leading-relaxed">
                   "{currentQ.text}"

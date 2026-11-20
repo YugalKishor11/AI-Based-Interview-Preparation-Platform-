@@ -27,6 +27,7 @@ import {
   SEED_QUESTIONS,
   SEED_PROGRESS_SNAPSHOTS,
 } from './seed';
+import { ttsService } from '../../shared/audio/ttsService';
 
 // Local storage keys
 const LS_SESSIONS_KEY = 'prepsphere_mock_sessions';
@@ -313,7 +314,11 @@ export class DemoVoiceProvider implements VoiceProvider {
   private onTranscriptPartialCb: ((text: string) => void) | null = null;
   private onTranscriptFinalCb: ((text: string) => void) | null = null;
   private onAudioStateCb: ((state: AudioState) => void) | null = null;
-  private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private currentVoiceId: string = 'voice-daniel-architect';
+
+  setVoice(voiceId: string): void {
+    this.currentVoiceId = voiceId;
+  }
 
   async connect(_sessionToken: string): Promise<void> {
     this.connectionState = 'connected';
@@ -326,47 +331,27 @@ export class DemoVoiceProvider implements VoiceProvider {
     this.setAudioState('idle');
   }
 
-  async speak(text: string): Promise<void> {
+  async speak(text: string, voiceId?: string): Promise<void> {
     this.interrupt();
     this.setAudioState('speaking');
 
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      return new Promise<void>((resolve) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        this.currentUtterance = utterance;
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
+    const targetVoice = voiceId || this.currentVoiceId;
 
-        // Try to pick a natural voice if available
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          const natural = voices.find((v) => v.lang.startsWith('en') && v.name.includes('Natural')) || voices[0];
-          if (natural) utterance.voice = natural;
-        }
-
-        utterance.onend = () => {
-          this.setAudioState('listening');
-          resolve();
-        };
-        utterance.onerror = () => {
-          this.setAudioState('listening');
-          resolve();
-        };
-
-        window.speechSynthesis.speak(utterance);
-      });
-    } else {
-      // Fallback timer if speech synthesis is not supported
-      await new Promise((r) => setTimeout(r, Math.min(text.length * 50, 3000)));
-      this.setAudioState('listening');
-    }
+    await ttsService.speak(text, targetVoice, {
+      onStart: () => {
+        this.setAudioState('speaking');
+      },
+      onEnd: () => {
+        this.setAudioState('listening');
+      },
+      onError: () => {
+        this.setAudioState('listening');
+      },
+    });
   }
 
   interrupt(): void {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    this.currentUtterance = null;
+    ttsService.stop();
     if (this.audioState === 'speaking') {
       this.setAudioState('listening');
     }

@@ -78,12 +78,25 @@ export const handleSessionToken = async (req: Request, ctx: { requestId: string 
   const expiresAt = Date.now() + (expectedDurationMins + 15) * 60 * 1000;
   const scopedToken = `pst_live_${crypto.randomUUID().replace(/-/g, '')}_${expiresAt}`;
 
+  const PERSONA_VOICE_MAP: Record<string, string> = {
+    p1: 'voice-aanya-supportive',
+    p2: 'voice-meera-balanced',
+    p3: 'voice-rohan-challenging',
+    p4: 'voice-daniel-architect',
+    'aanya-rao': 'voice-aanya-supportive',
+    'meera-kapoor': 'voice-meera-balanced',
+    'rohan-mehta': 'voice-rohan-challenging',
+    'daniel-brooks': 'voice-daniel-architect',
+  };
+  const voiceId = PERSONA_VOICE_MAP[personaId.toLowerCase()] || 'voice-daniel-architect';
+
   const responsePayload: SessionTokenResponse = {
     token: scopedToken,
     expiresAt,
     provider: 'demo',
     url: 'wss://voice.prepsphere.internal/session',
     creditsRemaining: currentCredits,
+    voiceId,
   };
 
   return new Response(JSON.stringify(responsePayload), {

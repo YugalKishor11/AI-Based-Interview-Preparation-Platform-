@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PersonaArt } from '../../shared/ui/PersonaArt';
 import { Button } from '../../shared/ui/Button';
@@ -7,20 +7,39 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { SEED_PERSONAS } from '../../data/mock/seed';
 import { Persona } from '../../data/contracts';
 import { ArrowRight, ArrowLeft, GitCompare, Sparkles, Volume2 } from 'lucide-react';
+import { ttsService, TTSState } from '../../shared/audio/ttsService';
+import { getVoiceConfig, SAMPLE_PREVIEW_TEXT } from '../../shared/audio/voiceRegistry';
 
 export const InterviewerSelectPage: React.FC = () => {
   const navigate = useNavigate();
-  const [selectedId, setSelectedId] = useState<string>('p4'); // Daniel Brooks by default
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    return localStorage.getItem('prepsphere_selected_persona_id') || 'p4';
+  });
   const [comparePersonas, setComparePersonas] = useState<[Persona, Persona] | null>(null);
   const [previewMsg, setPreviewMsg] = useState<string | null>(null);
+  const [ttsState, setTtsState] = useState<TTSState>(ttsService.getState());
 
-  const handleVoicePreview = (persona: Persona) => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(persona.sampleLine);
-      window.speechSynthesis.speak(u);
-      setPreviewMsg(`Sampling ${persona.name}: "${persona.sampleLine}"`);
-      setTimeout(() => setPreviewMsg(null), 4000);
+  useEffect(() => {
+    return ttsService.subscribe(setTtsState);
+  }, []);
+
+  const handleSelectPersona = (id: string) => {
+    setSelectedId(id);
+    const persona = SEED_PERSONAS.find((p) => p.id === id);
+    const voice = getVoiceConfig(id);
+    try {
+      localStorage.setItem('prepsphere_selected_persona_id', id);
+      localStorage.setItem('prepsphere_selected_voice_id', voice.id);
+    } catch {}
+  };
+
+  const handleVoicePreview = async (persona: Persona) => {
+    const voice = getVoiceConfig(persona.id);
+    setPreviewMsg(`Previewing ${persona.name} (${voice.styleDescription}): "${SAMPLE_PREVIEW_TEXT}"`);
+    try {
+      await ttsService.previewVoice(persona.id);
+    } catch (err) {
+      console.warn('Voice preview error:', err);
     }
   };
 
@@ -29,7 +48,8 @@ export const InterviewerSelectPage: React.FC = () => {
   };
 
   const handleContinue = () => {
-    navigate('/app/interview/check');
+    handleSelectPersona(selectedId);
+    navigate(`/app/interview/check?personaId=${selectedId}`);
   };
 
   return (
@@ -67,15 +87,23 @@ export const InterviewerSelectPage: React.FC = () => {
 
       {/* 4 Persona Art Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        {SEED_PERSONAS.map((persona) => (
-          <PersonaArt
-            key={persona.id}
-            persona={persona}
-            selected={selectedId === persona.id}
-            onSelect={() => setSelectedId(persona.id)}
-            onPreviewVoice={() => handleVoicePreview(persona)}
-          />
-        ))}
+        {SEED_PERSONAS.map((persona) => {
+          const voice = getVoiceConfig(persona.id);
+          const isThisSpeaking = ttsState.isSpeaking && ttsState.activeVoiceId === voice.id;
+          const isThisLoading = ttsState.isLoading && ttsState.activeVoiceId === voice.id;
+
+          return (
+            <PersonaArt
+              key={persona.id}
+              persona={persona}
+              selected={selectedId === persona.id}
+              isPlayingVoice={isThisSpeaking}
+              isLoadingVoice={isThisLoading}
+              onSelect={() => handleSelectPersona(persona.id)}
+              onPreviewVoice={() => handleVoicePreview(persona)}
+            />
+          );
+        })}
       </div>
 
       <div className="flex justify-between items-center pt-6 border-t border-border/15">
@@ -117,7 +145,7 @@ export const InterviewerSelectPage: React.FC = () => {
                     variant="secondary"
                     size="sm"
                     onClick={() => {
-                      setSelectedId(p.id);
+                      handleSelectPersona(p.id);
                       setComparePersonas(null);
                     }}
                     className="w-full mt-2"

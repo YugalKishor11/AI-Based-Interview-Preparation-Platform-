@@ -31,6 +31,7 @@ export default [
         sessionStorage: 'readonly',
         AudioContext: 'readonly',
         SpeechSynthesisUtterance: 'readonly',
+        SpeechSynthesisVoice: 'readonly',
         Blob: 'readonly',
         URL: 'readonly',
         IntersectionObserver: 'readonly',

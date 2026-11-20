@@ -86,7 +86,7 @@ Return JSON with planId, sessionId, title, questions array (index, category, que
       id: sessionId,
       user_id: user.id,
       plan_id: planId,
-      persona_id: 'daniel-brooks',
+      persona_id: parsed.data.personaId || 'p4',
       title: finalResponse.title,
       type,
       duration_mins: durationMinutes,

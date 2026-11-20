@@ -13,6 +13,7 @@ export const PersonaSchema = z.object({
   languages: z.string(),
   voiceGender: z.enum(['female', 'male']),
   sampleLine: z.string(),
+  voiceId: z.string().optional(),
   p1: z.string(), // primary orb/mesh gradient color
   p2: z.string(), // secondary orb/mesh gradient color
   isDemo: z.boolean().default(true),
@@ -212,6 +213,7 @@ export const SessionTokenResponseSchema = z.object({
   provider: z.enum(['livekit', 'gemini_live', 'openai_realtime', 'demo']),
   url: z.string().optional(),
   creditsRemaining: z.number(),
+  voiceId: z.string().optional(),
 });
 export type SessionTokenResponse = z.infer<typeof SessionTokenResponseSchema>;
 
@@ -226,6 +228,8 @@ export const PlanInterviewRequestSchema = z.object({
   language: z.string().default('English'),
   focusAreas: z.array(z.string()).optional(),
   resumeSummary: z.string().optional(),
+  personaId: z.string().optional(),
+  voiceId: z.string().optional(),
 });
 export type PlanInterviewRequest = z.infer<typeof PlanInterviewRequestSchema>;
 

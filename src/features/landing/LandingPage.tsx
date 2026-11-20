@@ -11,6 +11,8 @@ import { Button } from '../../shared/ui/Button';
 import { Sparkline } from '../../shared/charts/Sparkline';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '../../shared/ui/Accordion';
 import { SEED_PERSONAS } from '../../data/mock/seed';
+import { ttsService } from '../../shared/audio/ttsService';
+import { getVoiceConfig, SAMPLE_PREVIEW_TEXT } from '../../shared/audio/voiceRegistry';
 import {
   Mic,
   Shield,
@@ -76,14 +78,13 @@ const FAQS = [
 export const LandingPage: React.FC = () => {
   const [voicePreviewText, setVoicePreviewText] = useState<string | null>(null);
 
-  const handlePlayVoice = (persona: typeof SEED_PERSONAS[0]) => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(persona.sampleLine);
-      u.rate = 1.0;
-      window.speechSynthesis.speak(u);
-      setVoicePreviewText(`Playing ${persona.name}: "${persona.sampleLine}"`);
-      setTimeout(() => setVoicePreviewText(null), 4000);
+  const handlePlayVoice = async (persona: typeof SEED_PERSONAS[0]) => {
+    const voice = getVoiceConfig(persona.id);
+    setVoicePreviewText(`Playing ${persona.name} (${voice.styleDescription}): "${SAMPLE_PREVIEW_TEXT}"`);
+    try {
+      await ttsService.previewVoice(persona.id);
+    } catch (err) {
+      console.warn('Voice preview error:', err);
     }
   };
 

@@ -52,7 +52,8 @@ export type AudioState = 'idle' | 'listening' | 'thinking' | 'speaking';
 export interface VoiceProvider {
   connect(sessionToken: string): Promise<void>;
   disconnect(): Promise<void>;
-  speak(text: string): Promise<void>;
+  setVoice?(voiceId: string): void;
+  speak(text: string, voiceId?: string): Promise<void>;
   interrupt(): void;
   sendText(text: string): void;
   onTranscriptPartial(cb: (text: string) => void): void;

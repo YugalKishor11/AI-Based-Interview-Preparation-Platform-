@@ -7,6 +7,8 @@ import { Check, Volume2, Shield } from 'lucide-react';
 interface PersonaArtProps {
   persona: Persona;
   selected?: boolean;
+  isPlayingVoice?: boolean;
+  isLoadingVoice?: boolean;
   onSelect?: () => void;
   onPreviewVoice?: (e: React.MouseEvent) => void;
   className?: string;
@@ -15,6 +17,8 @@ interface PersonaArtProps {
 export const PersonaArt: React.FC<PersonaArtProps> = ({
   persona,
   selected = false,
+  isPlayingVoice = false,
+  isLoadingVoice = false,
   onSelect,
   onPreviewVoice,
   className,
@@ -93,9 +97,18 @@ export const PersonaArt: React.FC<PersonaArtProps> = ({
                 e.stopPropagation();
                 onPreviewVoice(e);
               }}
-              className="text-xs flex items-center gap-1 text-primary hover:text-primary-hover font-semibold px-2 py-1 rounded bg-primary/10 hover:bg-primary/20 transition-colors"
+              disabled={isLoadingVoice}
+              className={cn(
+                'text-xs flex items-center gap-1 font-semibold px-2.5 py-1 rounded transition-all',
+                isPlayingVoice
+                  ? 'bg-primary text-white shadow-sm shadow-primary/40 animate-pulse'
+                  : isLoadingVoice
+                  ? 'bg-elevated text-txt-muted cursor-wait'
+                  : 'text-primary hover:text-primary-hover bg-primary/10 hover:bg-primary/20'
+              )}
             >
-              <Volume2 className="w-3.5 h-3.5" /> Voice Sample
+              <Volume2 className={cn('w-3.5 h-3.5', isPlayingVoice && 'animate-bounce')} />
+              {isLoadingVoice ? 'Loading...' : isPlayingVoice ? 'Playing...' : 'Voice Sample'}
             </button>
           )}
         </div>
