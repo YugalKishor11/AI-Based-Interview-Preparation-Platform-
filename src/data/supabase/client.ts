@@ -8,8 +8,8 @@ export function getSupabaseCredentials(): { url: string; anonKey: string } {
   const localUrl = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_URL) : null;
   const localAnon = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_ANON) : null;
 
-  const url = (localUrl || import.meta.env.VITE_SUPABASE_URL || '').trim();
-  const anonKey = (localAnon || import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  const url = (localUrl !== null ? localUrl : (import.meta.env.VITE_SUPABASE_URL || '')).trim();
+  const anonKey = (localAnon !== null ? localAnon : (import.meta.env.VITE_SUPABASE_ANON_KEY || '')).trim();
 
   return { url, anonKey };
 }
@@ -28,13 +28,8 @@ export function isSupabaseConfigured(): boolean {
 
 export function setCustomSupabaseCredentials(url: string, anonKey: string): void {
   if (typeof window !== 'undefined') {
-    if (url && anonKey) {
-      localStorage.setItem(STORAGE_KEY_URL, url.trim());
-      localStorage.setItem(STORAGE_KEY_ANON, anonKey.trim());
-    } else {
-      localStorage.removeItem(STORAGE_KEY_URL);
-      localStorage.removeItem(STORAGE_KEY_ANON);
-    }
+    localStorage.setItem(STORAGE_KEY_URL, url.trim());
+    localStorage.setItem(STORAGE_KEY_ANON, anonKey.trim());
   }
 }
 

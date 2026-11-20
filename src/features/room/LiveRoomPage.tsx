@@ -12,7 +12,8 @@ import { useMicStream } from '../../shared/hooks/useMicStream';
 import { useAudioLevel } from '../../shared/hooks/useAudioLevel';
 import { SEED_PERSONAS } from '../../data/mock/seed';
 import { ttsService } from '../../shared/audio/ttsService';
-import { getVoiceConfig, VOICE_REGISTRY } from '../../shared/audio/voiceRegistry';
+import { getVoiceConfig } from '../../shared/audio/voiceRegistry';
+import { geminiService, isGeminiConfigured } from '../../shared/ai/geminiService';
 import {
   Mic,
   MicOff,
@@ -22,13 +23,10 @@ import {
   Clock,
   Sparkles,
   PhoneOff,
-  Settings,
   Send,
-  AlertTriangle,
-  RotateCcw,
-  Wifi,
-  FileText,
   Volume2,
+  Wifi,
+  Bot,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../shared/ui/Dialog';
 
@@ -36,19 +34,22 @@ const SCRIPTED_QUESTIONS = [
   {
     qIndex: 1,
     text: 'Design a high-throughput, multi-tenant distributed rate limiter supporting 500,000 req/sec across global regions.',
-    followUp: 'How do you handle atomic incrementation and race hazards when multiple edge nodes sync concurrently?',
   },
   {
     qIndex: 2,
     text: 'How do you mitigate clock skew and synchronized time windows across geographically dispersed nodes without heavy two-phase locking?',
-    followUp: 'Could you elaborate on why sliding window counters offer superior space complexity over sliding window logs?',
   },
   {
     qIndex: 3,
     text: 'If your primary Redis cluster partitions or degrades past 15ms latency, how does your reverse proxy degrade gracefully?',
-    followUp: 'Walk me through how backpressure and circuit breakers prevent cascading outages downstream.',
   },
 ];
+
+interface ConversationTurn {
+  role: 'interviewer' | 'candidate';
+  text: string;
+  timestamp: string;
+}
 
 export const LiveRoomPage: React.FC = () => {
   const navigate = useNavigate();
@@ -72,9 +73,14 @@ export const LiveRoomPage: React.FC = () => {
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [sideView, setSideView] = useState<'transcript' | 'code' | 'notes'>('code');
+  const [sideView, setSideView] = useState<'transcript' | 'code'>('transcript');
+  const [isProcessingAi, setIsProcessingAi] = useState(false);
 
+  // Gemini Conversational State
+  const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([]);
   const currentQ = SCRIPTED_QUESTIONS[context.currentQuestionIndex] || SCRIPTED_QUESTIONS[0];
+  const [activeSpeechText, setActiveSpeechText] = useState(currentQ.text);
+  const isGeminiLive = isGeminiConfigured();
 
   const handleVoiceChange = (newPersonaId: string) => {
     setSelectedPersonaId(newPersonaId);
@@ -87,16 +93,16 @@ export const LiveRoomPage: React.FC = () => {
     // Immediately stop ongoing speech and switch
     ttsService.stop();
     if (context.state === 'interviewer_speaking') {
-      ttsService.speak(currentQ.text, newVoice.id, {
+      ttsService.speak(activeSpeechText, newVoice.id, {
         onEnd: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
         onError: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
       });
     }
   };
 
-  const handleReplayQuestion = () => {
+  const handleReplayCurrent = () => {
     dispatch({ type: 'START_INTERVIEW' });
-    ttsService.speak(currentQ.text, voiceConfig.id, {
+    ttsService.speak(activeSpeechText, voiceConfig.id, {
       onEnd: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
       onError: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
     });
@@ -108,7 +114,7 @@ export const LiveRoomPage: React.FC = () => {
       ? 'speaking'
       : context.state === 'listening' || context.state === 'candidate_answering'
       ? 'listening'
-      : context.state === 'processing'
+      : context.state === 'processing' || isProcessingAi
       ? 'thinking'
       : context.state === 'reconnecting'
       ? 'reconnecting'
@@ -120,7 +126,7 @@ export const LiveRoomPage: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Barge-in detection: if interviewer is speaking and candidate speaks loudly, trigger BARGE_IN
+  // Barge-in detection: if interviewer is speaking and candidate speaks loudly, interrupt
   useEffect(() => {
     if (context.state === 'interviewer_speaking' && audioLevel > 0.25) {
       ttsService.stop();
@@ -128,11 +134,21 @@ export const LiveRoomPage: React.FC = () => {
     }
   }, [context.state, audioLevel]);
 
-  // Initial greeting & question speech synthesis
+  // Initial question speech synthesis on question index change
   useEffect(() => {
     let cancel = false;
-    const speakQuestion = async () => {
+    setActiveSpeechText(currentQ.text);
+
+    const speakInitial = async () => {
       dispatch({ type: 'START_INTERVIEW' });
+
+      // Record interviewer turn
+      const ts = new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' });
+      setConversationTurns((prev) => [
+        ...prev,
+        { role: 'interviewer', text: currentQ.text, timestamp: ts },
+      ]);
+
       await ttsService.speak(currentQ.text, voiceConfig.id, {
         onEnd: () => {
           if (!cancel) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
@@ -143,7 +159,7 @@ export const LiveRoomPage: React.FC = () => {
       });
     };
 
-    speakQuestion();
+    speakInitial();
     return () => {
       cancel = true;
       ttsService.stop();
@@ -174,24 +190,66 @@ export const LiveRoomPage: React.FC = () => {
     };
   }, [context.state]);
 
-  const handleSubmitAnswer = (text: string) => {
+  // Candidate Submits an Answer -> Gemini AI Agent analyzes and speaks follow-up
+  const handleSubmitAnswer = async (text: string) => {
     if (!text.trim()) return;
+    const answerTimestamp = new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' });
+    
+    // 1. Dispatch candidate answer
     dispatch({ type: 'CANDIDATE_SUBMIT_ANSWER', text });
     setTypedAnswer('');
     setShowTypeModal(false);
+    setIsProcessingAi(true);
 
-    // Simulate evaluator thinking and moving to next question or completion
-    setTimeout(() => {
-      const isLast = context.currentQuestionIndex >= SCRIPTED_QUESTIONS.length - 1;
-      dispatch({ type: 'PROCESS_COMPLETE', isLastQuestion: isLast });
-      if (isLast) {
-        navigate('/app/reports/rep-101');
-      }
-    }, 2200);
+    const updatedTurns: ConversationTurn[] = [
+      ...conversationTurns,
+      { role: 'candidate', text, timestamp: answerTimestamp },
+    ];
+    setConversationTurns(updatedTurns);
+
+    try {
+      // 2. Call Gemini API to generate the next interviewer turn
+      const interviewerReply = await geminiService.generateInterviewerTurn({
+        persona: interviewer,
+        questionText: currentQ.text,
+        candidateAnswer: text,
+        conversationHistory: updatedTurns,
+      });
+
+      const replyTimestamp = new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' });
+      setConversationTurns((prev) => [
+        ...prev,
+        { role: 'interviewer', text: interviewerReply, timestamp: replyTimestamp },
+      ]);
+      setActiveSpeechText(interviewerReply);
+      setIsProcessingAi(false);
+
+      // 3. Set room to interviewer speaking
+      dispatch({ type: 'INTERVIEWER_SPEAK_START', questionIndex: context.currentQuestionIndex });
+
+      // 4. Speak the Gemini response with the selected interviewer's voice
+      await ttsService.speak(interviewerReply, voiceConfig.id, {
+        onEnd: () => {
+          dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+        },
+        onError: () => {
+          dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+        },
+      });
+    } catch {
+      setIsProcessingAi(false);
+      dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+    }
   };
 
-  const handleEndEarly = () => {
-    navigate('/app/reports/rep-101');
+  const handleNextQuestion = () => {
+    ttsService.stop();
+    const isLast = context.currentQuestionIndex >= SCRIPTED_QUESTIONS.length - 1;
+    if (isLast) {
+      navigate('/app/reports/rep-101');
+    } else {
+      dispatch({ type: 'PROCESS_COMPLETE', isLastQuestion: false });
+    }
   };
 
   const formatTimer = (totalSeconds: number) => {
@@ -205,7 +263,12 @@ export const LiveRoomPage: React.FC = () => {
       {/* Top Status Strip */}
       <header className="h-14 px-6 border-b border-border/15 bg-surface/70 backdrop-blur-md flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Badge variant="demo">Demo Simulation</Badge>
+          <Badge variant={isGeminiLive ? 'ai' : 'demo'} className="flex items-center gap-1.5">
+            <Bot className="w-3.5 h-3.5 text-primary" />
+            <span>{isGeminiLive ? 'Gemini Agent Live' : 'Gemini Agent (Adaptive)'}</span>
+          </Badge>
+
+          {/* Voice Selector */}
           <div className="flex items-center gap-1.5 bg-surface/80 border border-border/25 px-2.5 py-1 rounded-lg">
             <Volume2 className="w-3.5 h-3.5 text-secondary shrink-0" />
             <span className="text-xs text-txt-muted hidden sm:inline">Voice:</span>
@@ -219,13 +282,14 @@ export const LiveRoomPage: React.FC = () => {
                 const v = getVoiceConfig(p.id);
                 return (
                   <option key={p.id} value={p.id} className="bg-surface text-txt">
-                    {p.name} ({p.voiceGender === 'female' ? 'Female' : 'Male'} · {p.style})
+                    {p.name.split(' ')[0]} ({v.gender}, {v.lang})
                   </option>
                 );
               })}
             </select>
           </div>
-          <span className="text-xs text-txt-muted hidden md:inline">
+
+          <span className="text-xs font-mono text-txt-muted hidden md:inline">
             Question {context.currentQuestionIndex + 1} of {SCRIPTED_QUESTIONS.length}
           </span>
         </div>
@@ -254,30 +318,30 @@ export const LiveRoomPage: React.FC = () => {
 
       {/* Main Two-Column Stage & Workspace */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden">
-        {/* Stage Column (Span 6 or 7) */}
+        {/* Stage Column */}
         <div className="lg:col-span-7 flex flex-col items-center justify-between p-6 overflow-y-auto relative border-r border-border/15">
-          {/* Question Card */}
+          {/* Question & Persona Card */}
           <div className="w-full max-w-2xl">
             <RgbBorder className="rounded-2xl">
               <GlassCard tier="2" className="p-6 border border-white/15">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-bold tracking-wider text-secondary uppercase">
-                    Current Question · Staff System Design
+                  <span className="text-[10px] font-bold tracking-wider text-secondary uppercase flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3 text-secondary" /> {interviewer.name} · {interviewer.style}
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleReplayQuestion}
+                      onClick={handleReplayCurrent}
                       className="text-[11px] font-semibold text-primary hover:text-primary-hover flex items-center gap-1 px-2 py-0.5 rounded bg-primary/10 hover:bg-primary/20 transition-colors"
-                      title="Replay audio in currently selected voice"
+                      title="Replay spoken question in selected voice"
                     >
-                      <Volume2 className="w-3 h-3" /> Replay in {interviewer.name.split(' ')[0]}'s Voice
+                      <Volume2 className="w-3 h-3" /> Replay Voice
                     </button>
-                    <Badge variant="ai">Live Probing</Badge>
+                    <Badge variant="ai">Live AI Conversation</Badge>
                   </div>
                 </div>
                 <h2 className="text-base font-bold text-txt leading-relaxed">
-                  "{currentQ.text}"
+                  "{activeSpeechText}"
                 </h2>
               </GlassCard>
             </RgbBorder>
@@ -294,37 +358,49 @@ export const LiveRoomPage: React.FC = () => {
           {/* Real-time Subtitles / Live Captions */}
           <div
             aria-live="polite"
-            className="w-full max-w-xl p-3 rounded-xl bg-black/40 border border-white/10 text-center text-xs text-txt-2 backdrop-blur-md mb-20 lg:mb-16"
+            className="w-full max-w-xl p-3.5 rounded-xl bg-black/40 border border-white/10 text-center text-xs text-txt-2 backdrop-blur-md mb-20 lg:mb-16"
           >
             <span className="text-txt-muted text-[10px] uppercase font-bold block mb-1">
-              Live Closed Captions
+              {context.state === 'interviewer_speaking'
+                ? `${interviewer.name} Speaking (Voice Synthesized)`
+                : 'Closed Captions'}
             </span>
             {context.state === 'interviewer_speaking' && (
-              <p className="italic text-txt leading-relaxed">{currentQ.text}</p>
+              <p className="italic text-txt leading-relaxed">"{activeSpeechText}"</p>
             )}
             {context.state === 'candidate_answering' && (
               <p className="text-emerald-400 font-semibold animate-pulse">
-                Speaking... Hold Spacebar or speak into microphone
+                Speaking... Hold Spacebar or click "Type Answer" to submit response
               </p>
             )}
             {context.state === 'listening' && (
               <p className="text-txt-muted">
-                Listening... (Barge-in active: speak at any time to answer)
+                Listening... (Click "Type / Dictate Answer" or speak to reply to {interviewer.name.split(' ')[0]})
               </p>
             )}
-            {context.state === 'processing' && (
-              <p className="text-primary font-semibold">
-                Synthesizing response and evaluating evidence...
+            {(context.state === 'processing' || isProcessingAi) && (
+              <p className="text-primary font-semibold flex items-center justify-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                Gemini Agent evaluating your response & formulating next question...
               </p>
             )}
           </div>
         </div>
 
-        {/* Side Column: Code Panel, Transcript, or Scratchpad (Span 5) */}
+        {/* Side Column: Transcript & Live Dialogue */}
         <div className="hidden lg:flex lg:col-span-5 flex-col bg-surface/50 overflow-hidden">
           {/* Side Tabs */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-border/15 bg-elevated/40">
             <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSideView('transcript')}
+                className={`text-xs font-semibold px-2.5 py-1 rounded-md transition-colors ${
+                  sideView === 'transcript' ? 'bg-primary/20 text-txt' : 'text-txt-muted hover:text-txt'
+                }`}
+              >
+                Live Dialogue ({conversationTurns.length})
+              </button>
               <button
                 type="button"
                 onClick={() => setSideView('code')}
@@ -334,36 +410,49 @@ export const LiveRoomPage: React.FC = () => {
               >
                 Code & Design
               </button>
-              <button
-                type="button"
-                onClick={() => setSideView('transcript')}
-                className={`text-xs font-semibold px-2.5 py-1 rounded-md transition-colors ${
-                  sideView === 'transcript' ? 'bg-primary/20 text-txt' : 'text-txt-muted hover:text-txt'
-                }`}
-              >
-                Live Transcript ({context.answers.length})
-              </button>
             </div>
-            <span className="text-[10px] text-txt-muted uppercase font-mono">Real-time Stream</span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleNextQuestion}
+                className="text-[11px] py-1 px-2.5"
+              >
+                Next Problem →
+              </Button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-hidden p-4">
             {sideView === 'code' ? (
               <CodePanel className="h-full" />
             ) : (
-              <div className="h-full overflow-y-auto space-y-3 text-xs">
-                {context.answers.length === 0 ? (
+              <div className="h-full overflow-y-auto space-y-3 text-xs pr-1">
+                {conversationTurns.length === 0 ? (
                   <div className="text-center py-12 text-txt-muted">
-                    No transcript entries yet. Answers will be logged here with timestamps.
+                    No transcript entries yet. Answers and Gemini follow-ups appear here.
                   </div>
                 ) : (
-                  context.answers.map((ans, i) => (
-                    <div key={i} className="p-3 rounded-xl bg-surface/80 border border-border/15 space-y-1">
-                      <div className="flex justify-between text-[10px] text-txt-muted">
-                        <span className="font-bold text-secondary">Candidate Answer</span>
-                        <span className="font-mono">{ans.timestamp}</span>
+                  conversationTurns.map((turn, i) => (
+                    <div
+                      key={i}
+                      className={`p-3 rounded-xl border space-y-1 ${
+                        turn.role === 'interviewer'
+                          ? 'bg-surface/90 border-primary/30 text-left'
+                          : 'bg-elevated/90 border-emerald-500/30 text-left'
+                      }`}
+                    >
+                      <div className="flex justify-between text-[10px]">
+                        <span
+                          className={`font-bold uppercase ${
+                            turn.role === 'interviewer' ? 'text-primary' : 'text-emerald-400'
+                          }`}
+                        >
+                          {turn.role === 'interviewer' ? `${interviewer.name} (Virtual AI)` : 'Candidate'}
+                        </span>
+                        <span className="font-mono text-txt-muted">{turn.timestamp}</span>
                       </div>
-                      <p className="text-txt-2 leading-relaxed">{ans.text}</p>
+                      <p className="text-txt-2 leading-relaxed">{turn.text}</p>
                     </div>
                   ))
                 )}
@@ -379,88 +468,92 @@ export const LiveRoomPage: React.FC = () => {
         <button
           type="button"
           onClick={() => {
-            if (context.state === 'candidate_answering') {
-              handleSubmitAnswer('We encapsulate token incrementation inside an atomic Redis Lua script to eliminate concurrency race conditions.');
-            } else {
+            if (context.state === 'listening') {
               dispatch({ type: 'CANDIDATE_START_ANSWER' });
+            } else if (context.state === 'candidate_answering') {
+              setShowTypeModal(true);
             }
           }}
-          className={`mic-btn ${
-            context.state === 'candidate_answering' ? 'active' : 'bg-primary/20 text-primary border border-primary/40'
+          className={`p-3 rounded-2xl border transition-all ${
+            context.state === 'candidate_answering'
+              ? 'bg-emerald-500 text-black border-emerald-400 shadow-lg scale-105'
+              : 'bg-surface hover:bg-elevated border-border/20 text-txt'
           }`}
-          title="Click to toggle mic or hold Spacebar"
+          title={context.state === 'candidate_answering' ? 'Click to finalize answer' : 'Click or hold Spacebar to speak'}
         >
-          <Mic className="w-6 h-6 stroke-[2]" />
+          <Mic className="w-5 h-5" />
         </button>
 
-        {/* Type Answer Button */}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setShowTypeModal(true)}
-          className="gap-1.5 text-xs"
-        >
-          <Keyboard className="w-4 h-4 text-secondary" /> Type Answer
-        </Button>
-
-        {/* Quick Submit Sample Answer (Demo shortcut) */}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() =>
-            handleSubmitAnswer(
-              'To handle 500,000 req/sec globally, we deploy localized Redis Sentinel clusters with Envoy proxies running local Token Bucket algorithms and fallback in-memory caches on network partitions.'
-            )
-          }
-          className="text-xs gap-1.5"
-        >
-          <Send className="w-3.5 h-3.5 text-emerald-400" /> Submit Candidate Sample
-        </Button>
-
-        {/* End Interview */}
+        {/* Text Input Trigger */}
         <button
           type="button"
-          onClick={() => setShowExitConfirm(true)}
-          className="w-10 h-10 rounded-full bg-danger/15 hover:bg-danger text-danger hover:text-white flex items-center justify-center transition-colors"
-          title="End interview and view report"
+          onClick={() => setShowTypeModal(true)}
+          className="p-3 rounded-2xl bg-surface hover:bg-elevated border border-border/20 text-txt transition-colors"
+          title="Type your answer to Gemini"
         >
-          <PhoneOff className="w-4 h-4" />
+          <Keyboard className="w-5 h-5" />
+        </button>
+
+        {/* Replay Current Spoken Line */}
+        <button
+          type="button"
+          onClick={handleReplayCurrent}
+          className="p-3 rounded-2xl bg-surface hover:bg-elevated border border-border/20 text-txt transition-colors"
+          title="Replay Gemini speech"
+        >
+          <Volume2 className="w-5 h-5" />
+        </button>
+
+        {/* Advance Question */}
+        <button
+          type="button"
+          onClick={handleNextQuestion}
+          className="px-4 py-3 rounded-2xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-colors"
+          title="Advance to next question"
+        >
+          Next Question
         </button>
       </div>
 
-      {/* Type Answer Modal */}
+      {/* Answer Modal Dialog */}
       <Dialog open={showTypeModal} onOpenChange={setShowTypeModal}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Type Your Answer</DialogTitle>
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <DialogTitle>Respond to {interviewer.name}</DialogTitle>
+            </div>
             <DialogDescription>
-              For quiet environments or microphone fallback, type your response to: "{currentQ.text}"
+              "{activeSpeechText}"
             </DialogDescription>
           </DialogHeader>
 
-          <textarea
-            value={typedAnswer}
-            onChange={(e) => setTypedAnswer(e.target.value)}
-            rows={5}
-            placeholder="Type your structured technical reasoning or STAR explanation..."
-            className="input textarea leading-relaxed"
-          />
+          <div className="space-y-4 pt-2">
+            <textarea
+              value={typedAnswer}
+              onChange={(e) => setTypedAnswer(e.target.value)}
+              placeholder="Structure your answer (e.g. 'I would approach this by isolating the partition tolerance with CRDTs...')"
+              rows={5}
+              className="input textarea text-xs leading-relaxed"
+              autoFocus
+            />
 
-          <div className="flex justify-between items-center mt-2">
-            <span className="text-[11px] text-txt-muted">
-              Press submit to advance evaluator pipeline
-            </span>
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => setShowTypeModal(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => handleSubmitAnswer(typedAnswer)}
-                disabled={!typedAnswer.trim()}
-              >
-                Submit Answer
-              </Button>
+            <div className="flex justify-between items-center text-[11px] text-txt-muted">
+              <span>Gemini will speak back in {interviewer.name.split(' ')[0]}'s voice ({voiceConfig.gender}, {voiceConfig.lang}).</span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setShowTypeModal(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleSubmitAnswer(typedAnswer)}
+                  disabled={!typedAnswer.trim()}
+                  className="gap-1"
+                >
+                  <Send className="w-3.5 h-3.5" /> Submit to Agent
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
@@ -470,20 +563,17 @@ export const LiveRoomPage: React.FC = () => {
       <Dialog open={showExitConfirm} onOpenChange={setShowExitConfirm}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <div className="flex items-center gap-2 text-danger mb-1">
-              <AlertTriangle className="w-5 h-5" />
-              <DialogTitle>Conclude Interview Session?</DialogTitle>
-            </div>
+            <DialogTitle>End Simulation Early?</DialogTitle>
             <DialogDescription>
-              Ending the interview will compile your answers into a completed demonstration report.
+              Your spoken transcript and answers will be evaluated to generate your evidence-linked performance report.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-3 mt-4">
             <Button variant="ghost" onClick={() => setShowExitConfirm(false)}>
-              Resume Practice
+              Continue Interview
             </Button>
-            <Button variant="danger" onClick={handleEndEarly}>
-              Conclude & Generate Report
+            <Button variant="danger" onClick={() => navigate('/app/reports/rep-101')}>
+              End & View Report
             </Button>
           </div>
         </DialogContent>

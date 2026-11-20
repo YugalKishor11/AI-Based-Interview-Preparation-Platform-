@@ -6,7 +6,7 @@ import {
   mapProfileRowToProfile,
   SupabaseAuthRepo,
 } from '../src/data/supabase';
-import { authRepo, profileRepo, dataSource } from '../src/data';
+import { MockAuthRepo } from '../src/data/mock';
 
 describe('Supabase Client & Auth Integration Suite', () => {
   beforeEach(() => {
@@ -100,11 +100,12 @@ describe('Supabase Client & Auth Integration Suite', () => {
     });
 
     it('demo fallback authRepo works smoothly in mock mode', async () => {
-      const user = await authRepo.getUser();
+      const mockAuth = new MockAuthRepo();
+      const user = await mockAuth.getUser();
       expect(user).not.toBeNull();
       expect(user?.email).toBeDefined();
 
-      const signedIn = await authRepo.signIn('demo.user@example.com');
+      const signedIn = await mockAuth.signIn('demo.user@example.com');
       expect(signedIn.email).toBe('demo.user@example.com');
     });
   });

@@ -14,6 +14,12 @@ import {
   isSupabaseConfigured,
 } from '../../data/supabase';
 import {
+  geminiService,
+  getGeminiApiKey,
+  setGeminiApiKey,
+  isGeminiConfigured as isGeminiLive,
+} from '../../shared/ai/geminiService';
+import {
   User,
   Sliders,
   Volume2,
@@ -27,6 +33,7 @@ import {
   LogOut,
   KeyRound,
   RefreshCw,
+  Bot,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../shared/ui/Dialog';
 
@@ -49,6 +56,11 @@ export const SettingsPage: React.FC = () => {
   const [supabaseUrl, setSupabaseUrl] = useState(initialCreds.url);
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(initialCreds.anonKey);
   const [backendNotice, setBackendNotice] = useState<string | null>(null);
+
+  // Gemini Configuration Form
+  const [geminiKey, setGeminiKey] = useState(getGeminiApiKey());
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
+  const [geminiTestMsg, setGeminiTestMsg] = useState<{ success: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (authProfile) {
@@ -83,6 +95,21 @@ export const SettingsPage: React.FC = () => {
         window.location.reload();
       }, 1000);
     }
+  };
+
+  const handleSaveGeminiConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    setGeminiApiKey(geminiKey);
+    setBackendNotice('Gemini API key saved successfully.');
+    setTimeout(() => setBackendNotice(null), 2500);
+  };
+
+  const handleTestGeminiConnection = async () => {
+    setIsTestingGemini(true);
+    setGeminiTestMsg(null);
+    const res = await geminiService.testConnection(geminiKey);
+    setGeminiTestMsg({ success: res.success, text: res.message });
+    setIsTestingGemini(false);
   };
 
   const handleSwitchToDemo = () => {
@@ -266,6 +293,74 @@ export const SettingsPage: React.FC = () => {
 
             <Button type="submit" variant="primary" size="sm" className="gap-1.5">
               <Database className="w-3.5 h-3.5" /> Save Credentials
+            </Button>
+          </div>
+        </form>
+      </GlassCard>
+
+      {/* 3. Google Gemini AI Agent & Voice Engine */}
+      <GlassCard tier="gcard" className="p-6 border border-white/15 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-border/15">
+          <div className="flex items-center gap-2.5">
+            <Bot className="w-5 h-5 text-primary" />
+            <div>
+              <h2 className="font-head font-bold text-base text-txt">Google Gemini API (Live AI Interviewer Agent)</h2>
+              <p className="text-[11px] text-txt-muted">Powers real-time interview conversations, adaptive follow-ups, and drill feedback</p>
+            </div>
+          </div>
+          <Badge variant={isGeminiLive() ? 'success' : 'demo'}>
+            {isGeminiLive() ? 'Gemini Live Active' : 'Adaptive Agent'}
+          </Badge>
+        </div>
+
+        <form onSubmit={handleSaveGeminiConfig} className="space-y-4 text-xs">
+          <div>
+            <label className="block text-xs font-semibold text-txt mb-1">Google Gemini API Key</label>
+            <div className="relative">
+              <input
+                type="password"
+                value={geminiKey}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                className="input text-xs font-mono"
+                placeholder="AIzaSy..."
+              />
+            </div>
+            <p className="text-[11px] text-txt-muted mt-1.5">
+              Gemini acts as the interviewer agent and speaks to you with the 4 voices. When no key is provided, the platform uses intelligent adaptive fallback logic.
+            </p>
+          </div>
+
+          {geminiTestMsg && (
+            <div
+              className={`p-3 rounded-lg border text-xs flex items-center gap-2 animate-in fade-in ${
+                geminiTestMsg.success
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                  : 'bg-danger/15 border-danger/30 text-danger'
+              }`}
+            >
+              {geminiTestMsg.success ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+              )}
+              <span>{geminiTestMsg.text}</span>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              loading={isTestingGemini}
+              onClick={handleTestGeminiConnection}
+              className="gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-secondary" /> Test Gemini Connection
+            </Button>
+
+            <Button type="submit" variant="primary" size="sm" className="gap-1.5">
+              <Bot className="w-3.5 h-3.5" /> Save Gemini Key
             </Button>
           </div>
         </form>

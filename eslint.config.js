@@ -50,6 +50,7 @@ export default [
         KeyboardEvent: 'readonly',
         HTMLElement: 'readonly',
         HTMLInputElement: 'readonly',
+        fetch: 'readonly',
         global: 'readonly',
       },
     },
