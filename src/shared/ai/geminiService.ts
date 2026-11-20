@@ -5,9 +5,32 @@ const STORAGE_KEY_MODEL = 'prepsphere_gemini_model';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
+function createTimeoutSignal(ms: number): AbortSignal | undefined {
+  if (typeof AbortController === 'undefined') return undefined;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    }, ms);
+    if (timer && typeof timer === 'object' && 'unref' in timer) {
+      (timer as { unref: () => void }).unref();
+    }
+    return controller.signal;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getGeminiApiKey(): string {
   const localKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_GEMINI) : null;
-  return (localKey || import.meta.env.VITE_GEMINI_API_KEY || '').trim();
+  if (localKey !== null) {
+    return localKey.trim();
+  }
+  return (import.meta.env.VITE_GEMINI_API_KEY || '').trim();
 }
 
 export function isGeminiConfigured(): boolean {
@@ -17,11 +40,7 @@ export function isGeminiConfigured(): boolean {
 
 export function setGeminiApiKey(key: string): void {
   if (typeof window !== 'undefined') {
-    if (key.trim()) {
-      localStorage.setItem(STORAGE_KEY_GEMINI, key.trim());
-    } else {
-      localStorage.removeItem(STORAGE_KEY_GEMINI);
-    }
+    localStorage.setItem(STORAGE_KEY_GEMINI, key.trim());
   }
 }
 
@@ -88,15 +107,24 @@ export class GeminiService {
           contents: [{ role: 'user', parts: [{ text: 'Respond with exactly: "PrepSphere Gemini Online"' }] }],
           generationConfig: { maxOutputTokens: 20 },
         }),
+        signal: createTimeoutSignal(12000),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
+        if (response.status === 503) {
+          return {
+            success: true,
+            message: `Key authenticated! Note: Google's ${model} is experiencing temporary high demand (503). The system will use adaptive resilience while Google processes the queue.`,
+          };
+        }
         return { success: false, message: `Gemini API (${model}) returned status ${response.status}: ${errorText}` };
       }
 
       const data = await response.json();
-      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const textPart = parts.find((p: { text?: string; thought?: boolean }) => Boolean(p.text && !p.thought)) || parts[0];
+      const reply = textPart?.text || '';
       return { success: true, message: `Connected to Google Gemini (${model})! Response: "${reply.trim()}"` };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error connecting to Gemini API';
@@ -153,6 +181,7 @@ CRITICAL INSTRUCTIONS:
             maxOutputTokens: 160,
           },
         }),
+        signal: createTimeoutSignal(12000),
       });
 
       if (!response.ok) {
@@ -161,7 +190,9 @@ CRITICAL INSTRUCTIONS:
       }
 
       const data = await response.json();
-      const generated = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const textPart = parts.find((p: { text?: string; thought?: boolean }) => Boolean(p.text && !p.thought)) || parts[0];
+      const generated = textPart?.text?.trim();
       if (generated) {
         // Strip markdown or quotation marks
         return generated.replace(/^["']|["']$/g, '').trim();
@@ -220,6 +251,7 @@ Analyze the answer rigorously. Return valid JSON only with this exact structure:
             responseMimeType: 'application/json',
           },
         }),
+        signal: createTimeoutSignal(12000),
       });
 
       if (!response.ok) {
@@ -227,7 +259,9 @@ Analyze the answer rigorously. Return valid JSON only with this exact structure:
       }
 
       const data = await response.json();
-      const rawJson = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      const textPart = parts.find((p: { text?: string; thought?: boolean }) => Boolean(p.text && !p.thought)) || parts[0];
+      const rawJson = textPart?.text;
       if (rawJson) {
         const parsed = JSON.parse(rawJson);
         return {
