@@ -36,10 +36,11 @@ export interface ProfileRepo {
 
 export interface AuthRepo {
   getUser(): Promise<Profile | null>;
-  signIn(email: string): Promise<Profile>;
-  signUp(name: string, email: string): Promise<Profile>;
+  signIn(email: string, password?: string): Promise<Profile>;
+  signUp(name: string, email: string, password?: string): Promise<Profile>;
   signOut(): Promise<void>;
   resetPassword(email: string): Promise<void>;
+  signInWithOAuth?(provider: 'google' | 'github'): Promise<void>;
 }
 
 export interface ProgressRepo {

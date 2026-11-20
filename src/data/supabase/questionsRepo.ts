@@ -1,0 +1,172 @@
+import { supabase, isSupabaseConfigured } from './client';
+import { QuestionsRepo } from '../repos/interfaces';
+import { Question } from '../contracts';
+import { store } from '../mock';
+import { QuestionRow } from './types';
+
+export class SupabaseQuestionsRepo implements QuestionsRepo {
+  async search(params?: { query?: string; topic?: string; level?: string; savedOnly?: boolean }): Promise<Question[]> {
+    if (!isSupabaseConfigured()) {
+      return this.searchMock(params);
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      let query = supabase.from('questions').select('*');
+
+      if (params?.topic && params.topic !== 'all') {
+        query = query.eq('topic', params.topic);
+      }
+      if (params?.level && params.level !== 'all') {
+        query = query.eq('level', params.level);
+      }
+      if (params?.query) {
+        query = query.or(`title.ilike.%${params.query}%,topic.ilike.%${params.query}%`);
+      }
+
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        return this.searchMock(params);
+      }
+
+      // Check saved status for user
+      let savedIds = new Set<string>();
+      if (user) {
+        const { data: savedRows } = await supabase
+          .from('saved_questions')
+          .select('question_id')
+          .eq('user_id', user.id);
+        if (savedRows) {
+          savedIds = new Set(savedRows.map((r: { question_id: string }) => r.question_id));
+        }
+      }
+
+      const questions: Question[] = (data as QuestionRow[]).map((row) => ({
+        id: row.id,
+        topic: row.topic,
+        level: row.level as 'Easy' | 'Medium' | 'Hard',
+        title: row.title,
+        tags: row.tags || [],
+        hint1: row.hint1,
+        hint2: row.hint2,
+        explanation: row.explanation || undefined,
+        saved: savedIds.has(row.id),
+        completed: false,
+        isDemo: row.is_demo,
+      }));
+
+      if (params?.savedOnly) {
+        return questions.filter((q) => q.saved);
+      }
+
+      return questions;
+    } catch {
+      return this.searchMock(params);
+    }
+  }
+
+  private searchMock(params?: { query?: string; topic?: string; level?: string; savedOnly?: boolean }): Question[] {
+    let list = [...store.questions];
+    if (params?.topic && params.topic !== 'all') {
+      list = list.filter((q) => q.topic.toLowerCase() === params.topic!.toLowerCase());
+    }
+    if (params?.level && params.level !== 'all') {
+      list = list.filter((q) => q.level.toLowerCase() === params.level!.toLowerCase());
+    }
+    if (params?.savedOnly) {
+      list = list.filter((q) => q.saved);
+    }
+    if (params?.query) {
+      const q = params.query.toLowerCase();
+      list = list.filter(
+        (item) =>
+          item.title.toLowerCase().includes(q) ||
+          item.topic.toLowerCase().includes(q) ||
+          item.tags.some((t) => t.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }
+
+  async get(id: string): Promise<Question> {
+    if (!isSupabaseConfigured()) {
+      const q = store.questions.find((item) => item.id === id);
+      if (!q) throw new Error(`Question ${id} not found`);
+      return q;
+    }
+
+    const { data, error } = await supabase
+      .from('questions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      const q = store.questions.find((item) => item.id === id);
+      if (q) return q;
+      throw new Error(`Question ${id} not found`);
+    }
+
+    const row = data as QuestionRow;
+    return {
+      id: row.id,
+      topic: row.topic,
+      level: row.level as 'Easy' | 'Medium' | 'Hard',
+      title: row.title,
+      tags: row.tags || [],
+      hint1: row.hint1,
+      hint2: row.hint2,
+      explanation: row.explanation || undefined,
+      isDemo: row.is_demo,
+    };
+  }
+
+  async toggleSave(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) {
+      const q = store.questions.find((item) => item.id === id);
+      if (q) {
+        q.saved = !q.saved;
+        store.saveQuestions();
+        return q.saved;
+      }
+      return false;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return false;
+    }
+
+    const { data: existing } = await supabase
+      .from('saved_questions')
+      .select('question_id')
+      .eq('user_id', user.id)
+      .eq('question_id', id)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from('saved_questions')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('question_id', id);
+      return false;
+    } else {
+      await supabase
+        .from('saved_questions')
+        .insert({ user_id: user.id, question_id: id });
+      return true;
+    }
+  }
+
+  async toggleComplete(id: string): Promise<boolean> {
+    const q = store.questions.find((item) => item.id === id);
+    if (q) {
+      q.completed = !q.completed;
+      store.saveQuestions();
+      return q.completed;
+    }
+    return false;
+  }
+}

@@ -5,8 +5,9 @@ import { Slider } from '../../shared/ui/Slider';
 import { Button } from '../../shared/ui/Button';
 import { Badge } from '../../shared/ui/Badge';
 import { mockDevState, store } from '../../data/mock';
+import { dataSource, isSupabaseConfigured } from '../../data';
 import { useTheme } from '../../shared/theme/ThemeProvider';
-import { RotateCcw, AlertTriangle, WifiOff, Clock, Shield } from 'lucide-react';
+import { RotateCcw, AlertTriangle, Clock, Shield, Database } from 'lucide-react';
 
 interface DevToolsDrawerProps {
   open: boolean;
@@ -14,9 +15,10 @@ interface DevToolsDrawerProps {
 }
 
 export const DevToolsDrawer: React.FC<DevToolsDrawerProps> = ({ open, onOpenChange }) => {
-  const { effects, setEffects, theme, setTheme } = useTheme();
+  const { effects, setEffects } = useTheme();
   const [forceFail, setForceFail] = useState(mockDevState.forceFailure);
   const [extraLatency, setExtraLatency] = useState(mockDevState.extraLatencyMs);
+  const currentSource = dataSource;
 
   const handleToggleFail = (val: boolean) => {
     mockDevState.forceFailure = val;
@@ -27,6 +29,11 @@ export const DevToolsDrawer: React.FC<DevToolsDrawerProps> = ({ open, onOpenChan
     const ms = vals[0] || 0;
     mockDevState.extraLatencyMs = ms;
     setExtraLatency(ms);
+  };
+
+  const handleToggleDataSource = (toSupabase: boolean) => {
+    localStorage.setItem('prepsphere_data_source', toSupabase ? 'supabase' : 'mock');
+    window.location.reload();
   };
 
   const handleResetData = () => {
@@ -48,6 +55,47 @@ export const DevToolsDrawer: React.FC<DevToolsDrawerProps> = ({ open, onOpenChan
         </SheetHeader>
 
         <div className="flex flex-col gap-6 mt-4">
+          {/* Data Source Switching */}
+          <div className="p-4 rounded-xl bg-surface/70 border border-border/20 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-semibold text-txt flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-primary" /> Active Backend Source
+              </div>
+              <Badge variant={currentSource === 'supabase' ? 'success' : 'demo'}>
+                {currentSource === 'supabase' ? 'Supabase' : 'Mock'}
+              </Badge>
+            </div>
+            <p className="text-xs text-txt-muted">
+              {isSupabaseConfigured()
+                ? 'Supabase credentials detected. You can seamlessly switch between live PostgreSQL and local sandbox.'
+                : 'Supabase credentials not configured in .env. Configure them in Settings to connect live.'}
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleToggleDataSource(false)}
+                className={`py-2 rounded-lg border text-xs font-semibold ${
+                  currentSource === 'mock'
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface text-txt-muted border-border/20 hover:text-txt'
+                }`}
+              >
+                Local Mock
+              </button>
+              <button
+                type="button"
+                onClick={() => handleToggleDataSource(true)}
+                className={`py-2 rounded-lg border text-xs font-semibold ${
+                  currentSource === 'supabase'
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface text-txt-muted border-border/20 hover:text-txt'
+                }`}
+              >
+                Supabase Live
+              </button>
+            </div>
+          </div>
+
           {/* Force API Failure */}
           <div className="p-4 rounded-xl bg-surface/70 border border-border/20 flex items-center justify-between">
             <div className="space-y-0.5">

@@ -2,17 +2,20 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout } from './AuthLayout';
 import { Button } from '../../shared/ui/Button';
-import { authRepo } from '../../data';
-import { Mail, Lock, User, AlertCircle, Check } from 'lucide-react';
+import { Badge } from '../../shared/ui/Badge';
+import { useAuth } from './AuthContext';
+import { Mail, Lock, User, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const SignupPage: React.FC = () => {
   const navigate = useNavigate();
+  const { signUp, isSupabase } = useAuth();
   const [name, setName] = useState('Alex Chen');
   const [email, setEmail] = useState('alex.chen@example.com');
   const [password, setPassword] = useState('StaffMastery2026!');
   const [consent, setConsent] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   // Password strength calculation
   const getPasswordStrength = (pass: string) => {
@@ -31,6 +34,8 @@ export const SignupPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessNotice(null);
+
     if (!consent) {
       setError('You must accept the practice terms and consent.');
       return;
@@ -42,10 +47,16 @@ export const SignupPage: React.FC = () => {
 
     setLoading(true);
     try {
-      await authRepo.signUp(name, email);
-      navigate('/onboarding');
-    } catch {
-      setError('Failed to create demo account.');
+      await signUp(name, email, password);
+      if (isSupabase) {
+        setSuccessNotice('Account created! Proceeding to candidate onboarding...');
+        setTimeout(() => navigate('/onboarding'), 1000);
+      } else {
+        navigate('/onboarding');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to register account.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -54,13 +65,33 @@ export const SignupPage: React.FC = () => {
   return (
     <AuthLayout
       title="Create Candidate Account"
-      subtitle="Start voice interview simulations with 120 demo credits"
+      subtitle="Start voice interview simulations with 120 practice credits"
     >
+      {/* Backend Status Pill */}
+      <div className="mb-4 flex items-center justify-between p-2.5 rounded-xl bg-surface/70 border border-border/20 text-xs">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isSupabase ? 'bg-emerald-400 animate-pulse' : 'bg-primary'}`} />
+          <span className="text-txt-2 font-mono text-[11px]">
+            {isSupabase ? 'Supabase Database Integration' : 'Local Sandbox Demo'}
+          </span>
+        </div>
+        <Badge variant={isSupabase ? 'success' : 'demo'} className="text-[10px] py-0">
+          {isSupabase ? 'Supabase' : 'Demo'}
+        </Badge>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="p-3 rounded-lg bg-danger/15 border border-danger/30 text-danger text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {successNotice && (
+          <div className="p-3 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{successNotice}</span>
           </div>
         )}
 
@@ -137,12 +168,12 @@ export const SignupPage: React.FC = () => {
             className="mt-1 rounded border-border"
           />
           <label htmlFor="terms" className="text-xs text-txt-2 leading-relaxed">
-            I agree to the practice terms. I understand that all scoring is an AI estimate and does not score accent or appearance.
+            I agree to the practice terms. I understand that all scoring is an AI estimate and does not score accent, gender, or appearance.
           </label>
         </div>
 
         <Button type="submit" variant="primary" loading={loading} className="w-full mt-2">
-          Create Account & Start Onboarding
+          {isSupabase ? 'Register & Begin Onboarding' : 'Create Demo Account'}
         </Button>
 
         <p className="text-center text-xs text-txt-2 pt-2">

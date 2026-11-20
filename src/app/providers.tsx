@@ -2,6 +2,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MotionConfig } from 'motion/react';
 import { ThemeProvider } from '../shared/theme/ThemeProvider';
+import { AuthProvider } from '../features/auth/AuthContext';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,9 +18,11 @@ export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <MotionConfig reducedMotion="user">
-          {children}
-        </MotionConfig>
+        <AuthProvider>
+          <MotionConfig reducedMotion="user">
+            {children}
+          </MotionConfig>
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
