@@ -1,6 +1,9 @@
 import { Persona } from '../../data/contracts';
 
 const STORAGE_KEY_GEMINI = 'prepsphere_gemini_api_key';
+const STORAGE_KEY_MODEL = 'prepsphere_gemini_model';
+
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
 export function getGeminiApiKey(): string {
   const localKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_GEMINI) : null;
@@ -18,6 +21,21 @@ export function setGeminiApiKey(key: string): void {
       localStorage.setItem(STORAGE_KEY_GEMINI, key.trim());
     } else {
       localStorage.removeItem(STORAGE_KEY_GEMINI);
+    }
+  }
+}
+
+export function getGeminiModel(): string {
+  const localModel = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY_MODEL) : null;
+  return (localModel || import.meta.env.VITE_GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
+}
+
+export function setGeminiModel(model: string): void {
+  if (typeof window !== 'undefined') {
+    if (model.trim()) {
+      localStorage.setItem(STORAGE_KEY_MODEL, model.trim());
+    } else {
+      localStorage.removeItem(STORAGE_KEY_MODEL);
     }
   }
 }
@@ -49,16 +67,20 @@ export interface DrillEvaluationResult {
 }
 
 export class GeminiService {
-  private model = 'gemini-1.5-flash';
+  public getModel(): string {
+    return getGeminiModel();
+  }
 
-  public async testConnection(customKey?: string): Promise<{ success: boolean; message: string }> {
+  public async testConnection(customKey?: string, customModel?: string): Promise<{ success: boolean; message: string }> {
     const key = customKey || getGeminiApiKey();
+    const model = customModel || getGeminiModel();
+
     if (!key) {
       return { success: false, message: 'No Gemini API key provided.' };
     }
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -70,12 +92,12 @@ export class GeminiService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        return { success: false, message: `Gemini API returned status ${response.status}: ${errorText}` };
+        return { success: false, message: `Gemini API (${model}) returned status ${response.status}: ${errorText}` };
       }
 
       const data = await response.json();
       const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      return { success: true, message: `Connected to Google Gemini! Response: "${reply.trim()}"` };
+      return { success: true, message: `Connected to Google Gemini (${model})! Response: "${reply.trim()}"` };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error connecting to Gemini API';
       return { success: false, message: msg };
@@ -83,10 +105,11 @@ export class GeminiService {
   }
 
   /**
-   * Generates the next conversational turn as the AI Interviewer
+   * Generates the next conversational turn as the AI Interviewer using Gemini 3.8 Flash
    */
   public async generateInterviewerTurn(params: InterviewerTurnParams): Promise<string> {
     const key = getGeminiApiKey();
+    const model = getGeminiModel();
     const { persona, questionText, candidateAnswer, conversationHistory = [] } = params;
 
     if (!key || !isGeminiConfigured()) {
@@ -95,6 +118,7 @@ export class GeminiService {
 
     const personaPrompt = `
 You are ${persona.name}, a Virtual AI Interviewer for PrepSphere.
+Model: ${model}
 Title: ${persona.title}
 Interview Style: ${persona.style} (${persona.description})
 Candidate's Target: Senior/Staff Software Engineering level.
@@ -113,7 +137,7 @@ CRITICAL INSTRUCTIONS:
       : '';
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -132,7 +156,7 @@ CRITICAL INSTRUCTIONS:
       });
 
       if (!response.ok) {
-        console.warn('Gemini API call failed, using adaptive fallback:', response.status);
+        console.warn(`Gemini API call (${model}) failed, using adaptive fallback:`, response.status);
         return this.fallbackInterviewerTurn(persona, questionText, candidateAnswer);
       }
 
@@ -144,16 +168,17 @@ CRITICAL INSTRUCTIONS:
       }
       return this.fallbackInterviewerTurn(persona, questionText, candidateAnswer);
     } catch (err) {
-      console.warn('Gemini API error, falling back:', err);
+      console.warn(`Gemini API error with model ${model}, falling back:`, err);
       return this.fallbackInterviewerTurn(persona, questionText, candidateAnswer);
     }
   }
 
   /**
-   * Evaluates a practice drill answer and generates structured coaching + spoken critique
+   * Evaluates a practice drill answer and generates structured coaching + spoken critique using Gemini 3.8 Flash
    */
   public async evaluatePracticeDrill(params: DrillEvaluationParams): Promise<DrillEvaluationResult> {
     const key = getGeminiApiKey();
+    const model = getGeminiModel();
     const { questionTitle, questionTopic, questionLevel, hints, candidateAnswer } = params;
 
     if (!key || !isGeminiConfigured()) {
@@ -162,6 +187,7 @@ CRITICAL INSTRUCTIONS:
 
     const prompt = `
 You are a Staff Software Engineer interviewer evaluating a candidate's answer to this practice question.
+Model: ${model}
 Question: "${questionTitle}"
 Topic: ${questionTopic}
 Level: ${questionLevel}
@@ -183,7 +209,7 @@ Analyze the answer rigorously. Return valid JSON only with this exact structure:
 `.trim();
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

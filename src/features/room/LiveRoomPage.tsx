@@ -265,7 +265,7 @@ export const LiveRoomPage: React.FC = () => {
         <div className="flex items-center gap-3">
           <Badge variant={isGeminiLive ? 'ai' : 'demo'} className="flex items-center gap-1.5">
             <Bot className="w-3.5 h-3.5 text-primary" />
-            <span>{isGeminiLive ? 'Gemini Agent Live' : 'Gemini Agent (Adaptive)'}</span>
+            <span>{isGeminiLive ? 'Gemini 3.8 Flash Live' : 'Gemini 3.8 Flash Agent'}</span>
           </Badge>
 
           {/* Voice Selector */}

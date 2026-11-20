@@ -17,6 +17,8 @@ import {
   geminiService,
   getGeminiApiKey,
   setGeminiApiKey,
+  getGeminiModel,
+  setGeminiModel,
   isGeminiConfigured as isGeminiLive,
 } from '../../shared/ai/geminiService';
 import {
@@ -59,6 +61,7 @@ export const SettingsPage: React.FC = () => {
 
   // Gemini Configuration Form
   const [geminiKey, setGeminiKey] = useState(getGeminiApiKey());
+  const [geminiModel, setGeminiModelInput] = useState(getGeminiModel());
   const [isTestingGemini, setIsTestingGemini] = useState(false);
   const [geminiTestMsg, setGeminiTestMsg] = useState<{ success: boolean; text: string } | null>(null);
 
@@ -100,14 +103,15 @@ export const SettingsPage: React.FC = () => {
   const handleSaveGeminiConfig = (e: React.FormEvent) => {
     e.preventDefault();
     setGeminiApiKey(geminiKey);
-    setBackendNotice('Gemini API key saved successfully.');
+    setGeminiModel(geminiModel);
+    setBackendNotice(`Gemini settings updated (${geminiModel}).`);
     setTimeout(() => setBackendNotice(null), 2500);
   };
 
   const handleTestGeminiConnection = async () => {
     setIsTestingGemini(true);
     setGeminiTestMsg(null);
-    const res = await geminiService.testConnection(geminiKey);
+    const res = await geminiService.testConnection(geminiKey, geminiModel);
     setGeminiTestMsg({ success: res.success, text: res.message });
     setIsTestingGemini(false);
   };
@@ -298,25 +302,25 @@ export const SettingsPage: React.FC = () => {
         </form>
       </GlassCard>
 
-      {/* 3. Google Gemini AI Agent & Voice Engine */}
+      {/* 3. Google Gemini 3.8 Flash AI Agent & Voice Engine */}
       <GlassCard tier="gcard" className="p-6 border border-white/15 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-border/15">
           <div className="flex items-center gap-2.5">
             <Bot className="w-5 h-5 text-primary" />
             <div>
-              <h2 className="font-head font-bold text-base text-txt">Google Gemini API (Live AI Interviewer Agent)</h2>
+              <h2 className="font-head font-bold text-base text-txt">Google Gemini 3.8 Flash (Live AI Interviewer Agent)</h2>
               <p className="text-[11px] text-txt-muted">Powers real-time interview conversations, adaptive follow-ups, and drill feedback</p>
             </div>
           </div>
           <Badge variant={isGeminiLive() ? 'success' : 'demo'}>
-            {isGeminiLive() ? 'Gemini Live Active' : 'Adaptive Agent'}
+            {isGeminiLive() ? 'Gemini 3.8 Flash Active' : 'Gemini 3.8 Flash'}
           </Badge>
         </div>
 
         <form onSubmit={handleSaveGeminiConfig} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-xs font-semibold text-txt mb-1">Google Gemini API Key</label>
-            <div className="relative">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-txt mb-1">Google Gemini API Key</label>
               <input
                 type="password"
                 value={geminiKey}
@@ -325,10 +329,21 @@ export const SettingsPage: React.FC = () => {
                 placeholder="AIzaSy..."
               />
             </div>
-            <p className="text-[11px] text-txt-muted mt-1.5">
-              Gemini acts as the interviewer agent and speaks to you with the 4 voices. When no key is provided, the platform uses intelligent adaptive fallback logic.
-            </p>
+            <div>
+              <label className="block text-xs font-semibold text-txt mb-1">AI Model Tag</label>
+              <input
+                type="text"
+                value={geminiModel}
+                onChange={(e) => setGeminiModelInput(e.target.value)}
+                className="input text-xs font-mono"
+                placeholder="gemini-3.8-flash"
+              />
+            </div>
           </div>
+
+          <p className="text-[11px] text-txt-muted">
+            Gemini 3.8 Flash acts as the interviewer agent and speaks to you with the 4 voices. When no key is provided, the platform uses intelligent adaptive fallback logic.
+          </p>
 
           {geminiTestMsg && (
             <div

@@ -4,6 +4,8 @@ import {
   isGeminiConfigured,
   getGeminiApiKey,
   setGeminiApiKey,
+  getGeminiModel,
+  setGeminiModel,
 } from '../src/shared/ai/geminiService';
 import { SEED_PERSONAS } from '../src/data/mock/seed';
 
@@ -33,6 +35,17 @@ describe('Gemini AI Service & Voice Agent Suite', () => {
       const res = await geminiService.testConnection();
       expect(res.success).toBe(false);
       expect(res.message).toContain('No Gemini API key');
+    });
+
+    it('defaults to Gemini 3.8 Flash model and allows custom model configuration', () => {
+      expect(getGeminiModel()).toBe('gemini-3.8-flash');
+      expect(geminiService.getModel()).toBe('gemini-3.8-flash');
+
+      setGeminiModel('gemini-3.8-pro');
+      expect(getGeminiModel()).toBe('gemini-3.8-pro');
+
+      setGeminiModel('');
+      expect(getGeminiModel()).toBe('gemini-3.8-flash');
     });
   });
 

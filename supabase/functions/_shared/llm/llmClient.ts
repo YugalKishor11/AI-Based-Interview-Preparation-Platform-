@@ -21,6 +21,7 @@ export interface ModelPricing {
 }
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {
+  'gemini-3.8-flash': { inputPerMillion: 0.075, outputPerMillion: 0.30 },
   'gemini-1.5-flash': { inputPerMillion: 0.075, outputPerMillion: 0.30 },
   'gemini-1.5-pro': { inputPerMillion: 1.25, outputPerMillion: 5.00 },
   'gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.60 },
@@ -35,7 +36,7 @@ export class LlmClient {
 
   constructor() {
     this.provider = getEnv('AI_PROVIDER', 'gemini').toLowerCase();
-    this.model = getEnv('AI_MODEL', this.provider === 'openai' ? 'gpt-4o-mini' : 'gemini-1.5-flash');
+    this.model = getEnv('AI_MODEL', this.provider === 'openai' ? 'gpt-4o-mini' : 'gemini-3.8-flash');
     this.apiKey = getEnv('AI_API_KEY', getEnv('GEMINI_API_KEY', getEnv('OPENAI_API_KEY', '')));
   }
 
