@@ -113,11 +113,19 @@ export const LandingPage: React.FC = () => {
 
         <div className="flex flex-wrap items-center justify-center gap-4 mb-8">
           <RgbBorder className="rounded-xl">
-            <Link to="/app/interview/new" className="btn btn-primary px-8 py-3.5 text-base">
+            <Link
+              to="/app/interview/new"
+              onClick={() => localStorage.setItem('prepsphere_guest_mode', 'true')}
+              className="btn btn-primary px-8 py-3.5 text-base"
+            >
               Start Free Voice Session <ArrowRight className="w-4 h-4 ml-1" />
             </Link>
           </RgbBorder>
-          <Link to="/app" className="btn btn-secondary px-6 py-3.5 text-base">
+          <Link
+            to="/app"
+            onClick={() => localStorage.setItem('prepsphere_guest_mode', 'true')}
+            className="btn btn-secondary px-6 py-3.5 text-base"
+          >
             Explore Demo Dashboard
           </Link>
         </div>

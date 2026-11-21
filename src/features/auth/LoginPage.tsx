@@ -263,6 +263,19 @@ export const LoginPage: React.FC = () => {
             Sign up
           </Link>
         </p>
+
+        <div className="pt-3 border-t border-border/20 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem('prepsphere_guest_mode', 'true');
+              navigate('/app');
+            }}
+            className="text-xs font-semibold text-secondary hover:text-secondary/80 inline-flex items-center gap-1.5 transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Continue to Workspace in Demo Mode &rarr;
+          </button>
+        </div>
       </form>
     </AuthLayout>
   );

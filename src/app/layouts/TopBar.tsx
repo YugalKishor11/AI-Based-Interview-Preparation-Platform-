@@ -191,6 +191,14 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenCommand, isPublic = false 
             ) : (
               <>
                 <Link
+                  to="/app"
+                  onClick={() => localStorage.setItem('prepsphere_guest_mode', 'true')}
+                  className="btn btn-secondary text-xs py-1.5 px-3 hidden sm:inline-flex items-center gap-1.5 text-txt"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-secondary" />
+                  <span>Enter Workspace</span>
+                </Link>
+                <Link
                   to="/login"
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg text-txt-2 hover:text-txt"
                 >

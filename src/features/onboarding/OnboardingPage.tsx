@@ -6,6 +6,8 @@ import { Button } from '../../shared/ui/Button';
 import { Badge } from '../../shared/ui/Badge';
 import { ConsentPanel } from '../../shared/ui/SystemStates';
 import { profileRepo } from '../../data';
+import { store } from '../../data/mock';
+import { useAuth } from '../auth/AuthContext';
 import {
   Sparkles,
   Target,
@@ -34,6 +36,7 @@ const ROLES = [
 
 export const OnboardingPage: React.FC = () => {
   const navigate = useNavigate();
+  const { refreshProfile } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedGoal, setSelectedGoal] = useState('promotion');
   const [targetRole, setTargetRole] = useState('Staff Software Engineer');
@@ -42,30 +45,68 @@ export const OnboardingPage: React.FC = () => {
   const [consentAgreed, setConsentAgreed] = useState(true);
   const [loading, setLoading] = useState(false);
 
+  const handleSkipToWorkspace = () => {
+    localStorage.setItem('prepsphere_onboarding_completed', 'true');
+    localStorage.setItem('prepsphere_guest_mode', 'true');
+    store.profile.onboardingCompleted = true;
+    store.saveProfile();
+    navigate('/app');
+  };
+
   const handleComplete = async () => {
     if (!consentAgreed) return;
     setLoading(true);
     try {
+      localStorage.setItem('prepsphere_onboarding_completed', 'true');
+      localStorage.setItem('prepsphere_guest_mode', 'true');
       await profileRepo.update({
         targetRole,
         targetLevel: experienceLevel,
         onboardingCompleted: true,
       });
-      navigate('/app');
+      await refreshProfile();
+    } catch (err) {
+      console.warn('Onboarding completion fallback:', err);
+      store.profile.targetRole = targetRole;
+      store.profile.targetLevel = experienceLevel;
+      store.profile.onboardingCompleted = true;
+      store.saveProfile();
+      try {
+        await refreshProfile();
+      } catch {
+        // ignore
+      }
     } finally {
       setLoading(false);
+      navigate('/app');
+      // Hard fallback if client router didn't transition
+      setTimeout(() => {
+        if (window.location.pathname.includes('/onboarding')) {
+          window.location.assign('/app');
+        }
+      }, 250);
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8">
       <div className="w-full max-w-2xl">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface/80 border border-border/30 text-xs font-semibold text-txt mb-3">
+        <div className="flex items-center justify-between mb-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface/80 border border-border/30 text-xs font-semibold text-txt">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             <span>Candidate Onboarding</span>
             <Badge variant="demo">Step {step} of 3</Badge>
           </div>
+          <button
+            type="button"
+            onClick={handleSkipToWorkspace}
+            className="text-xs font-semibold text-txt-muted hover:text-primary transition-colors inline-flex items-center gap-1"
+          >
+            Skip to Workspace <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="text-center mb-8">
           <h1 className="font-head text-3xl font-extrabold text-txt">
             Customize Your Prep Plan
           </h1>

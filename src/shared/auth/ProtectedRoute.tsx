@@ -20,14 +20,22 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     );
   }
 
-  // If live Supabase backend is active and user is unauthenticated, redirect to login with return path
-  if (isSupabase && !isAuthenticated) {
+  // Check if candidate is accessing in guest / demo mode or completed onboarding
+  const isGuestMode = typeof window !== 'undefined' && (
+    localStorage.getItem('prepsphere_guest_mode') === 'true' ||
+    localStorage.getItem('prepsphere_onboarding_completed') === 'true' ||
+    localStorage.getItem('prepsphere_data_source') === 'mock'
+  );
+
+  // If live Supabase backend is active and user is unauthenticated, redirect to login with return path unless guest mode is active
+  if (isSupabase && !isAuthenticated && !isGuestMode) {
     const intended = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?redirectTo=${intended}`} replace state={{ from: location }} />;
   }
 
-  // Onboarding gate: redirect new users to onboarding until completed
-  if (isSupabase && isAuthenticated && profile && profile.onboardingCompleted === false && !location.pathname.startsWith('/onboarding')) {
+  // Onboarding gate: redirect new authenticated users to onboarding only if not completed
+  const onboardingCompleted = profile?.onboardingCompleted || (typeof window !== 'undefined' && localStorage.getItem('prepsphere_onboarding_completed') === 'true');
+  if (isSupabase && isAuthenticated && !onboardingCompleted && !location.pathname.startsWith('/onboarding')) {
     return <Navigate to="/onboarding" replace />;
   }
 

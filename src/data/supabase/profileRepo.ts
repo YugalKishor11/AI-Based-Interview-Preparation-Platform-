@@ -34,34 +34,56 @@ export class SupabaseProfileRepo implements ProfileRepo {
       return store.profile;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      throw new Error('Not authenticated');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        // Fallback gracefully to local mock store when unauthenticated
+        store.profile = {
+          ...store.profile,
+          ...(p.name ? { name: p.name } : {}),
+          ...(p.targetRole ? { targetRole: p.targetRole } : {}),
+          ...(p.targetLevel ? { targetLevel: p.targetLevel } : {}),
+          ...(p.streakDays !== undefined ? { streakDays: p.streakDays } : {}),
+          ...(p.credits !== undefined ? { credits: p.credits } : {}),
+          ...(p.avatarUrl !== undefined ? { avatarUrl: p.avatarUrl } : {}),
+          ...(p.onboardingCompleted !== undefined ? { onboardingCompleted: p.onboardingCompleted } : {}),
+        };
+        store.saveProfile();
+        return store.profile;
+      }
+
+      const updates: Partial<ProfileRow> = {};
+      if (p.name !== undefined) updates.name = p.name;
+      if (p.targetRole !== undefined) updates.target_role = p.targetRole;
+      if (p.targetLevel !== undefined) updates.target_level = p.targetLevel;
+      if (p.streakDays !== undefined) updates.streak_days = p.streakDays;
+      if (p.credits !== undefined) updates.credits = p.credits;
+      if (p.avatarUrl !== undefined) updates.avatar_url = p.avatarUrl;
+      if (p.onboardingCompleted !== undefined) {
+        (updates as Record<string, unknown>).onboarding_completed_at = p.onboardingCompleted ? new Date().toISOString() : null;
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (error || !data) {
+        console.warn('Supabase profile update warning:', error?.message);
+        store.profile = { ...store.profile, ...p };
+        store.saveProfile();
+        return store.profile;
+      }
+
+      return mapProfileRowToProfile(data, user.email, false);
+    } catch (err) {
+      console.warn('Supabase profile update fallback:', err);
+      store.profile = { ...store.profile, ...p };
+      store.saveProfile();
+      return store.profile;
     }
-
-    const updates: Partial<ProfileRow> = {};
-    if (p.name !== undefined) updates.name = p.name;
-    if (p.targetRole !== undefined) updates.target_role = p.targetRole;
-    if (p.targetLevel !== undefined) updates.target_level = p.targetLevel;
-    if (p.streakDays !== undefined) updates.streak_days = p.streakDays;
-    if (p.credits !== undefined) updates.credits = p.credits;
-    if (p.avatarUrl !== undefined) updates.avatar_url = p.avatarUrl;
-    if (p.onboardingCompleted !== undefined) {
-      (updates as Record<string, unknown>).onboarding_completed_at = p.onboardingCompleted ? new Date().toISOString() : null;
-    }
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', user.id)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to update profile: ${error.message}`);
-    }
-
-    return mapProfileRowToProfile(data, user.email, false);
   }
 
   async deleteAllData(): Promise<void> {
