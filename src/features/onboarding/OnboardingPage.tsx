@@ -49,6 +49,7 @@ export const OnboardingPage: React.FC = () => {
       await profileRepo.update({
         targetRole,
         targetLevel: experienceLevel,
+        onboardingCompleted: true,
       });
       navigate('/app');
     } finally {

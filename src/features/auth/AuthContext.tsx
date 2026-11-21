@@ -10,11 +10,17 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isSupabase: boolean;
   loading: boolean;
+  sessionExpired: boolean;
+  dismissSessionExpired: () => void;
   signIn: (email: string, password?: string) => Promise<Profile>;
   signUp: (name: string, email: string, password?: string) => Promise<Profile>;
   signInWithOAuth: (provider: 'google' | 'github') => Promise<void>;
-  signOut: () => Promise<void>;
+  signOut: (options?: { scope?: 'global' | 'local' | 'others' }) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
+  updateEmail: (newEmail: string) => Promise<void>;
+  deleteAccount: (confirmation: string) => Promise<void>;
+  recordConsent: (kind: 'terms' | 'privacy' | 'recording' | 'resume_processing' | 'analytics', granted: boolean) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -25,8 +31,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<SupabaseSession | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const isSupabase = dataSource === 'supabase' && isSupabaseConfigured();
+
+  const dismissSessionExpired = () => setSessionExpired(false);
 
   const refreshProfile = useCallback(async () => {
     try {
@@ -120,20 +129,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signOut = async (): Promise<void> => {
-    await authRepo.signOut();
-    setUser(null);
-    setSession(null);
-    if (isSupabase) {
-      setProfile(null);
-    } else {
-      // In demo mode, reset to seed
-      await refreshProfile();
+  const signOut = async (options?: { scope?: 'global' | 'local' | 'others' }): Promise<void> => {
+    await authRepo.signOut(options);
+    if (!options || options.scope !== 'others') {
+      setUser(null);
+      setSession(null);
+      if (isSupabase) {
+        setProfile(null);
+      } else {
+        await refreshProfile();
+      }
     }
   };
 
   const resetPassword = async (email: string): Promise<void> => {
     await authRepo.resetPassword(email);
+  };
+
+  const updatePassword = async (newPassword: string): Promise<void> => {
+    if (authRepo.updatePassword) {
+      await authRepo.updatePassword(newPassword);
+    }
+  };
+
+  const updateEmail = async (newEmail: string): Promise<void> => {
+    if (authRepo.updateEmail) {
+      await authRepo.updateEmail(newEmail);
+      await refreshProfile();
+    }
+  };
+
+  const deleteAccount = async (confirmation: string): Promise<void> => {
+    if (authRepo.deleteAccount) {
+      await authRepo.deleteAccount(confirmation);
+      await signOut();
+    }
+  };
+
+  const recordConsent = async (
+    kind: 'terms' | 'privacy' | 'recording' | 'resume_processing' | 'analytics',
+    granted: boolean
+  ): Promise<void> => {
+    if (authRepo.recordConsent) {
+      await authRepo.recordConsent(kind, granted);
+    }
   };
 
   const isAuthenticated = isSupabase ? !!user : !!profile;
@@ -147,11 +186,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated,
         isSupabase,
         loading,
+        sessionExpired,
+        dismissSessionExpired,
         signIn,
         signUp,
         signInWithOAuth,
         signOut,
         resetPassword,
+        updatePassword,
+        updateEmail,
+        deleteAccount,
+        recordConsent,
         refreshProfile,
       }}
     >

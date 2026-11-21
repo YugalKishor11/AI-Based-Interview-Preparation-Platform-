@@ -1,35 +1,66 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthLayout } from './AuthLayout';
 import { Button } from '../../shared/ui/Button';
 import { Badge } from '../../shared/ui/Badge';
 import { useAuth } from './AuthContext';
-import { Mail, Lock, AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, AlertCircle, CheckCircle2, Sparkles } from 'lucide-react';
+import { mapAuthError } from '../../shared/auth/authErrorMapper';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTo = searchParams.get('redirectTo');
+
   const { signIn, signInWithOAuth, isSupabase } = useAuth();
+  const [authMode, setAuthMode] = useState<'password' | 'magic-link'>('password');
   const [email, setEmail] = useState('alex.chen@example.com');
   const [password, setPassword] = useState('StaffMastery2026!');
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  // Rate limit countdown effect
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => setCooldown((c) => c - 1), 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!email || !password) {
-      setError('Please provide email and password.');
+    setMagicLinkSent(false);
+
+    if (!email) {
+      setError('Please provide an email address.');
+      return;
+    }
+
+    if (authMode === 'password' && !password) {
+      setError('Please provide your password.');
       return;
     }
 
     setLoading(true);
     try {
-      await signIn(email, password);
-      navigate('/app');
+      if (authMode === 'password') {
+        await signIn(email, password);
+        const destination = redirectTo ? decodeURIComponent(redirectTo) : '/app';
+        navigate(destination);
+      } else {
+        // Magic link passwordless OTP flow
+        await signIn(email);
+        setMagicLinkSent(true);
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Unable to authenticate. Please check your credentials.';
-      setError(msg);
+      const mapped = mapAuthError(err);
+      setError(mapped.message);
+      if (mapped.retryAfterSeconds) {
+        setCooldown(mapped.retryAfterSeconds);
+      }
     } finally {
       setLoading(false);
     }
@@ -41,8 +72,8 @@ export const LoginPage: React.FC = () => {
     try {
       await signInWithOAuth('google');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Google OAuth sign in failed.';
-      setError(msg);
+      const mapped = mapAuthError(err);
+      setError(mapped.message);
       setOauthLoading(false);
     }
   };
@@ -65,11 +96,43 @@ export const LoginPage: React.FC = () => {
         </Badge>
       </div>
 
+      {/* Auth Mode Tabs (Password vs Magic Link) */}
+      <div className="grid grid-cols-2 gap-1 p-1 mb-4 rounded-xl bg-surface/80 border border-border/20 text-xs">
+        <button
+          type="button"
+          onClick={() => { setAuthMode('password'); setError(null); }}
+          className={`py-1.5 px-3 rounded-lg font-medium transition-colors ${
+            authMode === 'password' ? 'bg-primary text-white shadow-sm' : 'text-txt-muted hover:text-txt'
+          }`}
+        >
+          Password
+        </button>
+        <button
+          type="button"
+          onClick={() => { setAuthMode('magic-link'); setError(null); }}
+          className={`py-1.5 px-3 rounded-lg font-medium transition-colors ${
+            authMode === 'magic-link' ? 'bg-primary text-white shadow-sm' : 'text-txt-muted hover:text-txt'
+          }`}
+        >
+          Magic Link (Passwordless)
+        </button>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <div className="p-3 rounded-lg bg-danger/15 border border-danger/30 text-danger text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {magicLinkSent && (
+          <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs flex items-start gap-2.5 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <strong className="block font-semibold">Magic Link Dispatched</strong>
+              <span>Check your inbox for a one-click login link. No password required.</span>
+            </div>
           </div>
         )}
 
@@ -88,28 +151,41 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
 
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <label className="text-xs font-semibold text-txt">Password</label>
-            <Link to="/forgot-password" className="text-xs text-primary hover:underline">
-              Forgot password?
-            </Link>
+        {authMode === 'password' && (
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs font-semibold text-txt">Password</label>
+              <Link to="/forgot-password" className="text-xs text-primary hover:underline">
+                Forgot password?
+              </Link>
+            </div>
+            <div className="relative">
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="input pl-10"
+                placeholder="••••••••••••"
+                required
+              />
+              <Lock className="w-4 h-4 text-txt-muted absolute left-3 top-3" />
+            </div>
           </div>
-          <div className="relative">
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="input pl-10"
-              placeholder="••••••••••••"
-              required
-            />
-            <Lock className="w-4 h-4 text-txt-muted absolute left-3 top-3" />
-          </div>
-        </div>
+        )}
 
-        <Button type="submit" variant="primary" loading={loading} className="w-full mt-2">
-          {isSupabase ? 'Sign In' : 'Sign In (Demo Mode)'}
+        <Button
+          type="submit"
+          variant="primary"
+          loading={loading}
+          disabled={cooldown > 0}
+          disabledReason={cooldown > 0 ? `Wait ${cooldown}s before retrying` : undefined}
+          className="w-full mt-2"
+        >
+          {authMode === 'magic-link'
+            ? 'Send Magic Login Link'
+            : isSupabase
+            ? 'Sign In'
+            : 'Sign In (Demo Mode)'}
         </Button>
 
         {/* OAuth Separator */}

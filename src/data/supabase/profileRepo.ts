@@ -46,6 +46,9 @@ export class SupabaseProfileRepo implements ProfileRepo {
     if (p.streakDays !== undefined) updates.streak_days = p.streakDays;
     if (p.credits !== undefined) updates.credits = p.credits;
     if (p.avatarUrl !== undefined) updates.avatar_url = p.avatarUrl;
+    if (p.onboardingCompleted !== undefined) {
+      (updates as Record<string, unknown>).onboarding_completed_at = p.onboardingCompleted ? new Date().toISOString() : null;
+    }
 
     const { data, error } = await supabase
       .from('profiles')

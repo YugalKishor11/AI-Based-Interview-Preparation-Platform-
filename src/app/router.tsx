@@ -3,6 +3,7 @@ import { createBrowserRouter } from 'react-router-dom';
 import { PublicLayout } from './layouts/PublicLayout';
 import { AppLayout } from './layouts/AppLayout';
 import { RoomLayout } from './layouts/RoomLayout';
+import { ProtectedRoute } from '../shared/auth/ProtectedRoute';
 import { Spinner } from '../shared/ui/Spinner';
 
 // Route Fallback Loader
@@ -129,7 +130,11 @@ export const router = createBrowserRouter([
   // App Routes (AppLayout with TopBar, Dock, Page Container)
   {
     path: '/app',
-    element: <AppLayout />,
+    element: (
+      <ProtectedRoute>
+        <AppLayout />
+      </ProtectedRoute>
+    ),
     children: [
       {
         index: true,
@@ -209,7 +214,11 @@ export const router = createBrowserRouter([
   // Live Interview Room (RoomLayout: Full Bleed, No Global Nav)
   {
     path: '/app/interview/:id/live',
-    element: <RoomLayout />,
+    element: (
+      <ProtectedRoute>
+        <RoomLayout />
+      </ProtectedRoute>
+    ),
     children: [
       {
         index: true,

@@ -17,6 +17,7 @@ export const SEED_PROFILE: Profile = {
   credits: 120,
   joinedDate: 'October 2026',
   avatarUrl: '',
+  onboardingCompleted: true,
   isDemo: true,
 };
 

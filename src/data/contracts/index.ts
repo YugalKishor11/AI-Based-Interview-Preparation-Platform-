@@ -171,6 +171,7 @@ export const ProfileSchema = z.object({
   credits: z.number(),
   joinedDate: z.string(),
   avatarUrl: z.string().optional(),
+  onboardingCompleted: z.boolean().optional(),
   isDemo: z.boolean().default(true),
 });
 export type Profile = z.infer<typeof ProfileSchema>;

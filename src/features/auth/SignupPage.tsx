@@ -4,7 +4,8 @@ import { AuthLayout } from './AuthLayout';
 import { Button } from '../../shared/ui/Button';
 import { Badge } from '../../shared/ui/Badge';
 import { useAuth } from './AuthContext';
-import { Mail, Lock, User, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, User, AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { mapAuthError } from '../../shared/auth/authErrorMapper';
 
 export const SignupPage: React.FC = () => {
   const navigate = useNavigate();
@@ -12,23 +13,25 @@ export const SignupPage: React.FC = () => {
   const [name, setName] = useState('Alex Chen');
   const [email, setEmail] = useState('alex.chen@example.com');
   const [password, setPassword] = useState('StaffMastery2026!');
+  const [ageConfirmed, setAgeConfirmed] = useState(true);
   const [consent, setConsent] = useState(true);
+  const [aiConsent, setAiConsent] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
-  // Password strength calculation
+  // Password strength calculation enforcing minimum 10 characters (Prompt 4.2)
   const getPasswordStrength = (pass: string) => {
     let score = 0;
-    if (pass.length >= 8) score++;
-    if (/[A-Z]/.test(pass)) score++;
+    if (pass.length >= 10) score++;
+    if (/[A-Z]/.test(pass) && /[a-z]/.test(pass)) score++;
     if (/[0-9]/.test(pass)) score++;
     if (/[^A-Za-z0-9]/.test(pass)) score++;
     return score; // 0 to 4
   };
 
   const strength = getPasswordStrength(password);
-  const strengthLabels = ['Weak', 'Fair', 'Good', 'Strong'];
+  const strengthLabels = ['Too short (<10 chars)', 'Fair', 'Good', 'Strong'];
   const strengthColors = ['bg-danger', 'bg-warning', 'bg-secondary', 'bg-success'];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -36,12 +39,16 @@ export const SignupPage: React.FC = () => {
     setError(null);
     setSuccessNotice(null);
 
-    if (!consent) {
-      setError('You must accept the practice terms and consent.');
+    if (!ageConfirmed) {
+      setError('You must confirm that you are at least 18 years of age.');
       return;
     }
-    if (strength < 2) {
-      setError('Please use a stronger password with at least 8 characters and numbers.');
+    if (!consent) {
+      setError('You must accept the Terms of Service and Privacy Policy.');
+      return;
+    }
+    if (password.length < 10) {
+      setError('Password policy requires at least 10 characters (no composition theatrics).');
       return;
     }
 
@@ -49,14 +56,14 @@ export const SignupPage: React.FC = () => {
     try {
       await signUp(name, email, password);
       if (isSupabase) {
-        setSuccessNotice('Account created! Proceeding to candidate onboarding...');
+        setSuccessNotice('Account registered! Redirecting to candidate onboarding...');
         setTimeout(() => navigate('/onboarding'), 1000);
       } else {
         navigate('/onboarding');
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to register account.';
-      setError(msg);
+      const mapped = mapAuthError(err);
+      setError(mapped.message);
     } finally {
       setLoading(false);
     }
@@ -158,8 +165,22 @@ export const SignupPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Consent Checkbox */}
+        {/* Age Declaration (18+ requirement per Prompt 4.2) */}
         <div className="flex items-start gap-2 pt-1">
+          <input
+            type="checkbox"
+            id="age"
+            checked={ageConfirmed}
+            onChange={(e) => setAgeConfirmed(e.target.checked)}
+            className="mt-1 rounded border-border"
+          />
+          <label htmlFor="age" className="text-xs text-txt-2 leading-relaxed">
+            I declare that I am 18 years of age or older.
+          </label>
+        </div>
+
+        {/* Consent Checkboxes */}
+        <div className="flex items-start gap-2">
           <input
             type="checkbox"
             id="terms"
@@ -168,7 +189,20 @@ export const SignupPage: React.FC = () => {
             className="mt-1 rounded border-border"
           />
           <label htmlFor="terms" className="text-xs text-txt-2 leading-relaxed">
-            I agree to the practice terms. I understand that all scoring is an AI estimate and does not score accent, gender, or appearance.
+            I agree to the <Link to="/legal/terms" className="text-primary hover:underline">Terms of Service (v1.0)</Link> and <Link to="/legal/privacy" className="text-primary hover:underline">Privacy Policy (v1.0)</Link>.
+          </label>
+        </div>
+
+        <div className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            id="aiconsent"
+            checked={aiConsent}
+            onChange={(e) => setAiConsent(e.target.checked)}
+            className="mt-1 rounded border-border"
+          />
+          <label htmlFor="aiconsent" className="text-xs text-txt-2 leading-relaxed">
+            I consent to AI-based voice and resume evaluation. I understand that all scoring is an AI estimate and does not score accent, gender, or appearance.
           </label>
         </div>
 

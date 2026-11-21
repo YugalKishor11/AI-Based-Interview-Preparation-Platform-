@@ -290,13 +290,35 @@ export class MockAuthRepo implements AuthRepo {
     return store.profile;
   }
 
-  async signOut(): Promise<void> {
+  async signOut(_options?: { scope?: 'global' | 'local' | 'others' }): Promise<void> {
     await delay(150);
   }
 
-  async resetPassword(email: string): Promise<void> {
+  async resetPassword(_email: string): Promise<void> {
     await delay(250);
     // Never reveals if email exists (non-negotiable security)
+  }
+
+  async updatePassword(_newPassword: string): Promise<void> {
+    await delay(200);
+  }
+
+  async updateEmail(newEmail: string): Promise<void> {
+    await delay(200);
+    store.profile.email = newEmail;
+    store.saveProfile();
+  }
+
+  async deleteAccount(confirmation: string): Promise<void> {
+    if (confirmation !== 'DELETE') {
+      throw new Error("Please type 'DELETE' to confirm permanent account erasure.");
+    }
+    await delay(300);
+    store.resetAll();
+  }
+
+  async recordConsent(_kind: 'terms' | 'privacy' | 'recording' | 'resume_processing' | 'analytics', _granted: boolean): Promise<void> {
+    await delay(100);
   }
 }
 

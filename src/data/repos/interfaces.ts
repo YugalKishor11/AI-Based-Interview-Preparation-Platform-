@@ -38,9 +38,13 @@ export interface AuthRepo {
   getUser(): Promise<Profile | null>;
   signIn(email: string, password?: string): Promise<Profile>;
   signUp(name: string, email: string, password?: string): Promise<Profile>;
-  signOut(): Promise<void>;
+  signOut(options?: { scope?: 'global' | 'local' | 'others' }): Promise<void>;
   resetPassword(email: string): Promise<void>;
   signInWithOAuth?(provider: 'google' | 'github'): Promise<void>;
+  updatePassword?(newPassword: string): Promise<void>;
+  updateEmail?(newEmail: string): Promise<void>;
+  deleteAccount?(confirmation: string): Promise<void>;
+  recordConsent?(kind: 'terms' | 'privacy' | 'recording' | 'resume_processing' | 'analytics', granted: boolean): Promise<void>;
 }
 
 export interface ProgressRepo {

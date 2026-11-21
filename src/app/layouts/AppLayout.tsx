@@ -9,6 +9,7 @@ import { DevToolsDrawer } from '../../features/devtools/DevToolsDrawer';
 import { useGlobalHotkeys } from '../../shared/hooks/useHotkeys';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../shared/ui/Dialog';
 import { Kbd } from '../../shared/ui/Kbd';
+import { SessionExpiredDialog } from '../../shared/auth/SessionExpiredDialog';
 
 export const AppLayout: React.FC = () => {
   const [commandOpen, setCommandOpen] = useState(false);
@@ -62,6 +63,9 @@ export const AppLayout: React.FC = () => {
         open={devToolsOpen}
         onOpenChange={setDevToolsOpen}
       />
+
+      {/* Session Expired Re-auth Modal */}
+      <SessionExpiredDialog />
 
       {/* Keyboard Shortcuts Help Dialog */}
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
