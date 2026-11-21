@@ -1,6 +1,7 @@
 import React, { useReducer, useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { roomReducer, initialRoomContext } from './roomReducer';
+import { NextTurnResponse, ResumableInterviewState } from '../../data/contracts';
 import { VoiceOrb, VoiceOrbState } from '../../shared/ui/VoiceOrb';
 import { FluidWave } from '../../shared/ui/FluidWave';
 import { RgbBorder } from '../../shared/ui/RgbBorder';
@@ -13,7 +14,9 @@ import { useAudioLevel } from '../../shared/hooks/useAudioLevel';
 import { SEED_PERSONAS } from '../../data/mock/seed';
 import { ttsService } from '../../shared/audio/ttsService';
 import { getVoiceConfig } from '../../shared/audio/voiceRegistry';
-import { geminiService, isGeminiConfigured } from '../../shared/ai/geminiService';
+import { isGeminiConfigured } from '../../shared/ai/geminiService';
+import { getSupabaseCredentials, isSupabaseConfigured, supabase } from '../../data/supabase/client';
+import { normalizeQuestionText } from '../../../supabase/functions/_shared/repeatGuard';
 import {
   Mic,
   MicOff,
@@ -27,10 +30,11 @@ import {
   Volume2,
   Wifi,
   Bot,
+  AlertTriangle,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../../shared/ui/Dialog';
 
-const SCRIPTED_QUESTIONS = [
+export const SCRIPTED_QUESTIONS = [
   {
     qIndex: 1,
     text: 'Design a high-throughput, multi-tenant distributed rate limiter supporting 500,000 req/sec across global regions.',
@@ -43,6 +47,18 @@ const SCRIPTED_QUESTIONS = [
     qIndex: 3,
     text: 'If your primary Redis cluster partitions or degrades past 15ms latency, how does your reverse proxy degrade gracefully?',
   },
+  {
+    qIndex: 4,
+    text: 'How would you architect the underlying persistence schema and write-ahead log to support multi-region write replication while maintaining p99 read latency under 10ms?',
+  },
+  {
+    qIndex: 5,
+    text: 'What distributed tracing, cardinality management, and alerting thresholds would you configure to detect silent data corruption or partition storms?',
+  },
+  {
+    qIndex: 6,
+    text: 'Finally, walk me through the trade-offs between mutual TLS termination at the edge versus hop-by-hop mesh encryption under peak load.',
+  },
 ];
 
 interface ConversationTurn {
@@ -51,9 +67,150 @@ interface ConversationTurn {
   timestamp: string;
 }
 
+// Client helper that invokes the server next-turn Edge Function or deterministic fallback
+async function callNextTurnApi(params: {
+  sessionId: string;
+  turnSeq: number;
+  answerText: string;
+  typed: boolean;
+  elapsedSeconds: number;
+}): Promise<NextTurnResponse> {
+  const creds = getSupabaseCredentials();
+  const isSupabase = isSupabaseConfigured();
+
+  if (isSupabase && creds.url) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || creds.anonKey;
+      const url = `${creds.url}/functions/v1/next-turn`;
+      const idempotencyKey = `${params.sessionId}:${params.turnSeq}`;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          sessionId: params.sessionId,
+          turnSeq: params.turnSeq,
+          lastCandidateAnswer: params.answerText,
+          typed: params.typed,
+          elapsedSeconds: params.elapsedSeconds,
+        }),
+      });
+
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn('Next-turn Edge Function call unreachable, using local turn engine fallback:', err);
+    }
+  }
+
+  // Local turn engine matching server state machine & repeat guard
+  return localTurnEngine(params);
+}
+
+function localTurnEngine(params: {
+  sessionId: string;
+  turnSeq: number;
+  answerText: string;
+  typed: boolean;
+  elapsedSeconds: number;
+}): Promise<NextTurnResponse> {
+  const resumeKey = `prepsphere_resumable_${params.sessionId}`;
+  let resumable: ResumableInterviewState = {
+    turn_seq: 0,
+    position: 0,
+    followups_used_for_current: 0,
+    asked_question_ids: [],
+    asked_texts_normalized: [normalizeQuestionText(SCRIPTED_QUESTIONS[0].text)],
+    elapsed_ms: params.elapsedSeconds * 1000,
+    is_completed: false,
+  };
+
+  const storedStr = localStorage.getItem(resumeKey);
+  if (storedStr) {
+    try {
+      resumable = { ...resumable, ...JSON.parse(storedStr) };
+    } catch {}
+  }
+
+  const currentPos = Math.min(resumable.position, SCRIPTED_QUESTIONS.length - 1);
+  let action: 'ask_followup' | 'next_question' | 'wrap_up' = 'ask_followup';
+  let nextPos = currentPos;
+  let followupsUsed = resumable.followups_used_for_current;
+  let spokenText = '';
+
+  // Max 2 follow-ups rule: advance when 2 follow-ups reached
+  if (followupsUsed >= 2) {
+    const candidateNextPos = currentPos + 1;
+    if (candidateNextPos >= SCRIPTED_QUESTIONS.length) {
+      action = 'wrap_up';
+      spokenText = 'Thank you for walking me through those components. That concludes our planned interview questions today. Let us wrap up and review your report.';
+    } else {
+      action = 'next_question';
+      nextPos = candidateNextPos;
+      followupsUsed = 0;
+      spokenText = `Understood. Moving forward to our next question: ${SCRIPTED_QUESTIONS[candidateNextPos].text}`;
+    }
+  } else {
+    // Generate follow-up or advance
+    const wordCount = params.answerText.trim().split(/\s+/).length;
+    if (wordCount > 25 && followupsUsed >= 1) {
+      const candidateNextPos = currentPos + 1;
+      if (candidateNextPos >= SCRIPTED_QUESTIONS.length) {
+        action = 'wrap_up';
+        spokenText = 'Thank you for walking me through those components. That concludes our planned topics today.';
+      } else {
+        action = 'next_question';
+        nextPos = candidateNextPos;
+        followupsUsed = 0;
+        spokenText = `Great explanation. Let us move to the next technical topic: ${SCRIPTED_QUESTIONS[candidateNextPos].text}`;
+      }
+    } else {
+      action = 'ask_followup';
+      followupsUsed += 1;
+      spokenText = followupsUsed === 1
+        ? 'That addresses the primary flow. How does your architecture handle node partition recovery under high concurrent load?'
+        : 'Good insight on the failure modes. What specific metrics or p99 SLAs would you track to alert on degraded performance?';
+    }
+  }
+
+  const newTurnSeq = params.turnSeq + 1;
+  const updatedResumable: ResumableInterviewState = {
+    turn_seq: newTurnSeq,
+    position: nextPos,
+    followups_used_for_current: followupsUsed,
+    asked_question_ids: [...resumable.asked_question_ids, `q-${currentPos}`],
+    asked_texts_normalized: [...resumable.asked_texts_normalized, normalizeQuestionText(spokenText)],
+    elapsed_ms: params.elapsedSeconds * 1000,
+    active_question_text: spokenText,
+    is_completed: action === 'wrap_up',
+  };
+
+  localStorage.setItem(resumeKey, JSON.stringify(updatedResumable));
+
+  return Promise.resolve({
+    action,
+    spokenText,
+    position: nextPos,
+    turnSeq: newTurnSeq,
+    questionId: `q-${nextPos}`,
+    reason: 'local_engine',
+    timeRemainingSeconds: Math.max(0, 1800 - params.elapsedSeconds),
+    nextQuestionIndex: nextPos,
+    fallbackUsed: false,
+  });
+}
+
 export const LiveRoomPage: React.FC = () => {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
+  const sessionId = id || searchParams.get('sessionId') || 'live-101';
   const [context, dispatch] = useReducer(roomReducer, initialRoomContext);
 
   const initialPersonaId =
@@ -76,12 +233,12 @@ export const LiveRoomPage: React.FC = () => {
   const [sideView, setSideView] = useState<'transcript' | 'code'>('transcript');
   const [isProcessingAi, setIsProcessingAi] = useState(false);
 
-  // Gemini Conversational State
+  // Speech Guards & Turn State
+  const spokenTurnSeqsRef = useRef<Set<number>>(new Set());
   const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([]);
-  const currentQ = SCRIPTED_QUESTIONS[context.currentQuestionIndex] || SCRIPTED_QUESTIONS[0];
-  const [activeSpeechText, setActiveSpeechText] = useState(currentQ.text);
   const isGeminiLive = isGeminiConfigured();
 
+  // Voice change handler (does NOT restart the interview turn or reset state)
   const handleVoiceChange = (newPersonaId: string) => {
     setSelectedPersonaId(newPersonaId);
     const newVoice = getVoiceConfig(newPersonaId);
@@ -90,10 +247,10 @@ export const LiveRoomPage: React.FC = () => {
       localStorage.setItem('prepsphere_selected_voice_id', newVoice.id);
     } catch {}
 
-    // Immediately stop ongoing speech and switch
+    // Immediately stop ongoing speech and switch voice for future turns
     ttsService.stop();
-    if (context.state === 'interviewer_speaking') {
-      ttsService.speak(activeSpeechText, newVoice.id, {
+    if (context.state === 'interviewer_speaking' && context.activeSpeechText) {
+      ttsService.speak(context.activeSpeechText, newVoice.id, {
         onEnd: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
         onError: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
       });
@@ -101,8 +258,15 @@ export const LiveRoomPage: React.FC = () => {
   };
 
   const handleReplayCurrent = () => {
-    dispatch({ type: 'START_INTERVIEW' });
-    ttsService.speak(activeSpeechText, voiceConfig.id, {
+    ttsService.stop();
+    if (!context.activeSpeechText) return;
+    dispatch({
+      type: 'INTERVIEWER_SPEAK_START',
+      questionIndex: context.currentQuestionIndex,
+      turnSeq: context.turnSeq,
+      text: context.activeSpeechText,
+    });
+    ttsService.speak(context.activeSpeechText, voiceConfig.id, {
       onEnd: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
       onError: () => dispatch({ type: 'INTERVIEWER_SPEAK_END' }),
     });
@@ -134,37 +298,74 @@ export const LiveRoomPage: React.FC = () => {
     }
   }, [context.state, audioLevel]);
 
-  // Initial question speech synthesis on question index change
+  // Session Initialization / Resume on Mount
   useEffect(() => {
-    let cancel = false;
-    setActiveSpeechText(currentQ.text);
+    const resumeKey = `prepsphere_resumable_${sessionId}`;
+    const storedState = localStorage.getItem(resumeKey);
 
-    const speakInitial = async () => {
-      dispatch({ type: 'START_INTERVIEW' });
+    if (storedState) {
+      try {
+        const parsed = JSON.parse(storedState) as ResumableInterviewState;
+        if (parsed && typeof parsed.turn_seq === 'number' && parsed.position > 0) {
+          // Hydrate from resumable_state
+          dispatch({ type: 'RESUME_SESSION_STATE', state: parsed });
+          return;
+        }
+      } catch {}
+    }
 
-      // Record interviewer turn
-      const ts = new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' });
-      setConversationTurns((prev) => [
-        ...prev,
-        { role: 'interviewer', text: currentQ.text, timestamp: ts },
-      ]);
+    // Default initial turn (Turn 0)
+    const initialQ = SCRIPTED_QUESTIONS[0];
+    const initialText = initialQ.text;
+    dispatch({
+      type: 'INTERVIEWER_SPEAK_START',
+      questionIndex: 0,
+      turnSeq: 0,
+      text: initialText,
+    });
+    setConversationTurns([
+      {
+        role: 'interviewer',
+        text: initialText,
+        timestamp: new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' }),
+      },
+    ]);
+  }, [sessionId]);
 
-      await ttsService.speak(currentQ.text, voiceConfig.id, {
-        onEnd: () => {
-          if (!cancel) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        },
-        onError: () => {
-          if (!cancel) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        },
-      });
+  // Server-Authoritative Speech Synthesis Effect: Runs strictly ONCE per turn_seq
+  useEffect(() => {
+    if (context.state !== 'interviewer_speaking' || !context.activeSpeechText) {
+      return;
+    }
+
+    // Guard: Prevent re-speaking on render, StrictMode remount, or voice switch
+    if (spokenTurnSeqsRef.current.has(context.turnSeq)) {
+      return;
+    }
+    spokenTurnSeqsRef.current.add(context.turnSeq);
+
+    let cancelled = false;
+    const playSpeech = async () => {
+      try {
+        await ttsService.speak(context.activeSpeechText, voiceConfig.id, {
+          onEnd: () => {
+            if (!cancelled) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+          },
+          onError: () => {
+            if (!cancelled) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+          },
+        });
+      } catch {
+        if (!cancelled) dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+      }
     };
 
-    speakInitial();
+    playSpeech();
     return () => {
-      cancel = true;
+      cancelled = true;
       ttsService.stop();
     };
-  }, [context.currentQuestionIndex, currentQ.text, selectedPersonaId, voiceConfig.id]);
+  }, [context.state, context.turnSeq, context.activeSpeechText, voiceConfig.id]);
 
   // Spacebar push-to-talk handler
   useEffect(() => {
@@ -190,12 +391,11 @@ export const LiveRoomPage: React.FC = () => {
     };
   }, [context.state]);
 
-  // Candidate Submits an Answer -> Gemini AI Agent analyzes and speaks follow-up
+  // Candidate Submits an Answer -> Server Decides Follow-up vs Next Question
   const handleSubmitAnswer = async (text: string) => {
     if (!text.trim()) return;
     const answerTimestamp = new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' });
-    
-    // 1. Dispatch candidate answer
+
     dispatch({ type: 'CANDIDATE_SUBMIT_ANSWER', text });
     setTypedAnswer('');
     setShowTypeModal(false);
@@ -208,37 +408,53 @@ export const LiveRoomPage: React.FC = () => {
     setConversationTurns(updatedTurns);
 
     try {
-      // 2. Call Gemini API to generate the next interviewer turn
-      const interviewerReply = await geminiService.generateInterviewerTurn({
-        persona: interviewer,
-        questionText: currentQ.text,
-        candidateAnswer: text,
-        conversationHistory: updatedTurns,
+      const response = await callNextTurnApi({
+        sessionId,
+        turnSeq: context.turnSeq,
+        answerText: text,
+        typed: true,
+        elapsedSeconds: timerSeconds,
       });
+
+      setIsProcessingAi(false);
 
       const replyTimestamp = new Date().toLocaleTimeString([], { minute: '2-digit', second: '2-digit' });
       setConversationTurns((prev) => [
         ...prev,
-        { role: 'interviewer', text: interviewerReply, timestamp: replyTimestamp },
+        { role: 'interviewer', text: response.spokenText, timestamp: replyTimestamp },
       ]);
-      setActiveSpeechText(interviewerReply);
+
+      dispatch({ type: 'TURN_RESPONSE_RECEIVED', response });
+
+      if (response.action === 'wrap_up' || response.action === 'conclude_session') {
+        setTimeout(() => {
+          navigate(`/app/reports/rep-101`);
+        }, 3500);
+      }
+    } catch (err) {
+      console.warn('Next-turn call exception, progressing safely:', err);
       setIsProcessingAi(false);
 
-      // 3. Set room to interviewer speaking
-      dispatch({ type: 'INTERVIEWER_SPEAK_START', questionIndex: context.currentQuestionIndex });
+      // Deterministic progression fallback (never loops on current question)
+      const nextPos = Math.min(context.currentQuestionIndex + 1, SCRIPTED_QUESTIONS.length - 1);
+      const isWrapUp = context.currentQuestionIndex >= SCRIPTED_QUESTIONS.length - 1;
+      const nextQ = SCRIPTED_QUESTIONS[nextPos];
+      const fallbackResponse: NextTurnResponse = {
+        action: isWrapUp ? 'wrap_up' : 'next_question',
+        spokenText: isWrapUp
+          ? 'Thank you for walking me through your architecture and reasoning. Let us wrap up here so you can review your feedback report.'
+          : `Understood. Moving forward to our next question: ${nextQ.text}`,
+        position: nextPos,
+        turnSeq: context.turnSeq + 1,
+        reason: 'error_fallback',
+        timeRemainingSeconds: Math.max(0, 1800 - timerSeconds),
+        fallbackUsed: true,
+      };
 
-      // 4. Speak the Gemini response with the selected interviewer's voice
-      await ttsService.speak(interviewerReply, voiceConfig.id, {
-        onEnd: () => {
-          dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        },
-        onError: () => {
-          dispatch({ type: 'INTERVIEWER_SPEAK_END' });
-        },
-      });
-    } catch {
-      setIsProcessingAi(false);
-      dispatch({ type: 'INTERVIEWER_SPEAK_END' });
+      dispatch({ type: 'TURN_RESPONSE_RECEIVED', response: fallbackResponse });
+      if (isWrapUp) {
+        setTimeout(() => navigate('/app/reports/rep-101'), 3500);
+      }
     }
   };
 
@@ -248,7 +464,35 @@ export const LiveRoomPage: React.FC = () => {
     if (isLast) {
       navigate('/app/reports/rep-101');
     } else {
-      dispatch({ type: 'PROCESS_COMPLETE', isLastQuestion: false });
+      const nextPos = context.currentQuestionIndex + 1;
+      const nextQ = SCRIPTED_QUESTIONS[nextPos];
+      const newTurnSeq = context.turnSeq + 1;
+      const resp: NextTurnResponse = {
+        action: 'next_question',
+        spokenText: nextQ.text,
+        position: nextPos,
+        turnSeq: newTurnSeq,
+        questionId: `q-${nextPos}`,
+        reason: 'candidate_next_action',
+        timeRemainingSeconds: Math.max(0, 1800 - timerSeconds),
+      };
+      dispatch({ type: 'TURN_RESPONSE_RECEIVED', response: resp });
+
+      try {
+        const resumeKey = `prepsphere_resumable_${sessionId}`;
+        const existing = localStorage.getItem(resumeKey);
+        const parsed = existing ? JSON.parse(existing) : {};
+        localStorage.setItem(
+          resumeKey,
+          JSON.stringify({
+            ...parsed,
+            turn_seq: newTurnSeq,
+            position: nextPos,
+            active_question_text: nextQ.text,
+            is_completed: false,
+          })
+        );
+      } catch {}
     }
   };
 
@@ -257,6 +501,11 @@ export const LiveRoomPage: React.FC = () => {
     const s = totalSeconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  const activeSpeechText =
+    context.activeSpeechText ||
+    SCRIPTED_QUESTIONS[context.currentQuestionIndex]?.text ||
+    SCRIPTED_QUESTIONS[0].text;
 
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden text-txt">
@@ -315,6 +564,14 @@ export const LiveRoomPage: React.FC = () => {
           </Button>
         </div>
       </header>
+
+      {/* Fallback Warning Banner */}
+      {context.fallbackActive && (
+        <div className="bg-warning/15 border-b border-warning/30 px-4 py-1.5 text-xs text-warning flex items-center justify-center gap-2 shrink-0">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          <span>AI follow-up unavailable, using planned questions</span>
+        </div>
+      )}
 
       {/* Main Two-Column Stage & Workspace */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden">

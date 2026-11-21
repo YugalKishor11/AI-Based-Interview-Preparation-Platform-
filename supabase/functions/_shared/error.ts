@@ -58,6 +58,12 @@ export class RateLimitError extends AppError {
   }
 }
 
+export class ConflictError extends AppError {
+  constructor(message = 'Resource conflict', code = 'CONFLICT') {
+    super(message, 409, code);
+  }
+}
+
 export class IdempotencyConflictError extends AppError {
   constructor(message = 'Concurrent request in progress for this idempotency key.') {
     super(message, 409, 'IDEMPOTENCY_CONFLICT');

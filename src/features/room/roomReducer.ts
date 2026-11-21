@@ -1,3 +1,5 @@
+import { NextTurnResponse, ResumableInterviewState } from '../../data/contracts';
+
 export type RoomState =
   | 'setup'
   | 'device_check'
@@ -12,10 +14,12 @@ export type RoomState =
 
 export type RoomAction =
   | { type: 'START_INTERVIEW' }
-  | { type: 'INTERVIEWER_SPEAK_START'; questionIndex: number }
+  | { type: 'INTERVIEWER_SPEAK_START'; questionIndex: number; turnSeq?: number; text?: string }
   | { type: 'INTERVIEWER_SPEAK_END' }
   | { type: 'CANDIDATE_START_ANSWER' }
   | { type: 'CANDIDATE_SUBMIT_ANSWER'; text: string }
+  | { type: 'TURN_RESPONSE_RECEIVED'; response: NextTurnResponse }
+  | { type: 'RESUME_SESSION_STATE'; state: ResumableInterviewState }
   | { type: 'BARGE_IN' }
   | { type: 'PROCESS_COMPLETE'; isLastQuestion: boolean }
   | { type: 'NETWORK_LOST' }
@@ -26,6 +30,9 @@ export interface RoomContext {
   state: RoomState;
   previousLiveState: RoomState | null;
   currentQuestionIndex: number;
+  turnSeq: number;
+  activeSpeechText: string;
+  fallbackActive: boolean;
   totalQuestions: number;
   answers: { qIndex: number; text: string; timestamp: string }[];
   isMuted: boolean;
@@ -37,7 +44,10 @@ export const initialRoomContext: RoomContext = {
   state: 'ready',
   previousLiveState: null,
   currentQuestionIndex: 0,
-  totalQuestions: 3,
+  turnSeq: 0,
+  activeSpeechText: '',
+  fallbackActive: false,
+  totalQuestions: 6,
   answers: [],
   isMuted: false,
   isCameraOn: false,
@@ -52,6 +62,7 @@ export function roomReducer(context: RoomContext, action: RoomAction): RoomConte
           ...context,
           state: 'interviewer_speaking',
           currentQuestionIndex: 0,
+          turnSeq: 0,
         };
       }
       return context;
@@ -62,6 +73,8 @@ export function roomReducer(context: RoomContext, action: RoomAction): RoomConte
           ...context,
           state: 'interviewer_speaking',
           currentQuestionIndex: action.questionIndex,
+          ...(action.turnSeq !== undefined ? { turnSeq: action.turnSeq } : {}),
+          ...(action.text ? { activeSpeechText: action.text } : {}),
         };
       }
       return context;
@@ -112,21 +125,41 @@ export function roomReducer(context: RoomContext, action: RoomAction): RoomConte
       }
       return context;
 
+    case 'TURN_RESPONSE_RECEIVED': {
+      const resp = action.response;
+      const isWrapUp = resp.action === 'wrap_up' || resp.action === 'conclude_session';
+      return {
+        ...context,
+        state: isWrapUp ? 'completed' : 'interviewer_speaking',
+        currentQuestionIndex: resp.position,
+        turnSeq: resp.turnSeq,
+        activeSpeechText: resp.spokenText,
+        fallbackActive: Boolean(resp.fallbackUsed),
+      };
+    }
+
+    case 'RESUME_SESSION_STATE':
+      return {
+        ...context,
+        state: action.state.is_completed ? 'completed' : 'listening',
+        currentQuestionIndex: action.state.position,
+        turnSeq: action.state.turn_seq,
+        activeSpeechText: action.state.active_question_text || context.activeSpeechText,
+      };
+
     case 'PROCESS_COMPLETE':
-      if (context.state === 'processing') {
-        if (action.isLastQuestion) {
-          return {
-            ...context,
-            state: 'completed',
-          };
-        }
+      if (action.isLastQuestion) {
         return {
           ...context,
-          state: 'interviewer_speaking',
-          currentQuestionIndex: context.currentQuestionIndex + 1,
+          state: 'completed',
         };
       }
-      return context;
+      return {
+        ...context,
+        state: 'interviewer_speaking',
+        currentQuestionIndex: context.currentQuestionIndex + 1,
+        turnSeq: context.turnSeq + 1,
+      };
 
     case 'NETWORK_LOST':
       if (['interviewer_speaking', 'listening', 'candidate_answering', 'processing'].includes(context.state)) {

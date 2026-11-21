@@ -253,12 +253,26 @@ export const PlanInterviewResponseSchema = z.object({
 export type PlanInterviewResponse = z.infer<typeof PlanInterviewResponseSchema>;
 
 // 3. next-turn (P3)
+export const ResumableInterviewStateSchema = z.object({
+  turn_seq: z.number().int().min(0).default(0),
+  position: z.number().int().min(0).default(0),
+  followups_used_for_current: z.number().int().min(0).default(0),
+  asked_question_ids: z.array(z.string()).default([]),
+  asked_texts_normalized: z.array(z.string()).default([]),
+  elapsed_ms: z.number().default(0),
+  active_question_text: z.string().optional(),
+  is_completed: z.boolean().optional().default(false),
+});
+export type ResumableInterviewState = z.infer<typeof ResumableInterviewStateSchema>;
+
 export const NextTurnRequestSchema = z.object({
   sessionId: z.string(),
-  currentQuestionIndex: z.number(),
-  elapsedSeconds: z.number(),
-  totalDurationSeconds: z.number(),
-  lastCandidateAnswer: z.string(),
+  turnSeq: z.number().int().min(0).default(0),
+  lastCandidateAnswer: z.string().default(''),
+  typed: z.boolean().default(false),
+  elapsedSeconds: z.number().default(0),
+  totalDurationSeconds: z.number().default(1800),
+  currentQuestionIndex: z.number().optional(),
   dialogueHistory: z.array(z.object({
     role: z.enum(['interviewer', 'candidate']),
     text: z.string(),
@@ -267,11 +281,15 @@ export const NextTurnRequestSchema = z.object({
 export type NextTurnRequest = z.infer<typeof NextTurnRequestSchema>;
 
 export const NextTurnResponseSchema = z.object({
-  action: z.enum(['probe_deeper', 'pivot_topic', 'advance_question', 'conclude_session']),
+  action: z.enum(['ask_followup', 'next_question', 'wrap_up', 'probe_deeper', 'pivot_topic', 'advance_question', 'conclude_session']),
   spokenText: z.string(),
-  reason: z.string(),
-  nextQuestionIndex: z.number(),
-  timeRemainingSeconds: z.number(),
+  position: z.number().default(0),
+  turnSeq: z.number().default(0),
+  questionId: z.string().optional(),
+  reason: z.string().optional().default(''),
+  nextQuestionIndex: z.number().optional(),
+  timeRemainingSeconds: z.number().optional().default(1800),
+  fallbackUsed: z.boolean().optional(),
 });
 export type NextTurnResponse = z.infer<typeof NextTurnResponseSchema>;
 

@@ -243,7 +243,7 @@ describe('Supabase Edge Functions Backend Suite', () => {
       const res = await handleNextTurn(req, { requestId: 'req-turn' });
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(['probe_deeper', 'pivot_topic', 'advance_question', 'conclude_session']).toContain(json.action);
+      expect(['ask_followup', 'next_question', 'wrap_up', 'probe_deeper', 'pivot_topic', 'advance_question', 'conclude_session']).toContain(json.action);
       expect(json.spokenText.length).toBeGreaterThan(10);
       expect(json.timeRemainingSeconds).toBe(1500);
     });
@@ -266,7 +266,7 @@ describe('Supabase Edge Functions Backend Suite', () => {
 
       const res = await handleNextTurn(req, { requestId: 'req-turn-exp' });
       const json = await res.json();
-      expect(json.action).toBe('conclude_session');
+      expect(['wrap_up', 'conclude_session']).toContain(json.action);
       expect(json.timeRemainingSeconds).toBe(50);
     });
 
