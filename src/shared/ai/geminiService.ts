@@ -283,7 +283,7 @@ Analyze the answer rigorously. Return valid JSON only with this exact structure:
   // Adaptive Fallbacks when API key is not yet set
   private fallbackInterviewerTurn(persona: Persona, question: string, answer: string): string {
     const isShort = answer.trim().split(/\s+/).length < 15;
-    
+
     if (persona.id === 'p1') { // Aanya - Supportive EM
       return isShort
         ? "Thanks for outlining that initial thought. Could you elaborate on how your team would handle cross-functional dependencies during this phase?"
