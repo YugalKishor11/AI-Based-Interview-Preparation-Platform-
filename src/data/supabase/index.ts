@@ -7,3 +7,4 @@ export * from './reportsRepo';
 export * from './questionsRepo';
 export * from './progressRepo';
 export * from './interviewEngine';
+export * from './callFn';

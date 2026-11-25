@@ -1,13 +1,14 @@
 import { supabase, isSupabaseConfigured } from './client';
 import { QuestionsRepo } from '../repos/interfaces';
-import { Question } from '../contracts';
+import { Question, QuestionSchema } from '../contracts';
 import { store } from '../mock';
+import { offlineQueue } from '../offlineQueue';
 import { QuestionRow } from './types';
 
 export class SupabaseQuestionsRepo implements QuestionsRepo {
   async search(params?: { query?: string; topic?: string; level?: string; savedOnly?: boolean }): Promise<Question[]> {
     if (!isSupabaseConfigured()) {
-      return this.searchMock(params);
+      return this.searchMock(params).map((q) => QuestionSchema.parse(q));
     }
 
     try {
@@ -27,34 +28,42 @@ export class SupabaseQuestionsRepo implements QuestionsRepo {
 
       const { data, error } = await query;
       if (error || !data || data.length === 0) {
-        return this.searchMock(params);
+        return this.searchMock(params).map((q) => QuestionSchema.parse(q));
       }
 
-      // Check saved status for user
+      // Check saved and completed status for user
       let savedIds = new Set<string>();
+      let completedIds = new Set<string>();
       if (user) {
         const { data: savedRows } = await supabase
           .from('saved_questions')
-          .select('question_id')
+          .select('question_id, done_at')
           .eq('user_id', user.id);
         if (savedRows) {
           savedIds = new Set(savedRows.map((r: { question_id: string }) => r.question_id));
+          completedIds = new Set(
+            savedRows
+              .filter((r: { done_at?: string | null }) => Boolean(r.done_at))
+              .map((r: { question_id: string }) => r.question_id)
+          );
         }
       }
 
-      const questions: Question[] = (data as QuestionRow[]).map((row) => ({
-        id: row.id,
-        topic: row.topic,
-        level: row.level as 'Easy' | 'Medium' | 'Hard',
-        title: row.title,
-        tags: row.tags || [],
-        hint1: row.hint1,
-        hint2: row.hint2,
-        explanation: row.explanation || undefined,
-        saved: savedIds.has(row.id),
-        completed: false,
-        isDemo: row.is_demo,
-      }));
+      const questions: Question[] = (data as QuestionRow[]).map((row) =>
+        QuestionSchema.parse({
+          id: row.id,
+          topic: row.topic,
+          level: (row.level as 'Easy' | 'Medium' | 'Hard') || 'Medium',
+          title: row.title,
+          tags: row.tags || [],
+          hint1: row.hint1 || '',
+          hint2: row.hint2 || '',
+          explanation: row.explanation || undefined,
+          saved: savedIds.has(row.id),
+          completed: completedIds.has(row.id),
+          isDemo: Boolean(row.is_demo),
+        })
+      );
 
       if (params?.savedOnly) {
         return questions.filter((q) => q.saved);
@@ -62,7 +71,7 @@ export class SupabaseQuestionsRepo implements QuestionsRepo {
 
       return questions;
     } catch {
-      return this.searchMock(params);
+      return this.searchMock(params).map((q) => QuestionSchema.parse(q));
     }
   }
 
@@ -93,33 +102,41 @@ export class SupabaseQuestionsRepo implements QuestionsRepo {
     if (!isSupabaseConfigured()) {
       const q = store.questions.find((item) => item.id === id);
       if (!q) throw new Error(`Question ${id} not found`);
-      return q;
+      return QuestionSchema.parse(q);
     }
 
-    const { data, error } = await supabase
-      .from('questions')
-      .select('*')
-      .eq('id', id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-    if (error || !data) {
+      if (error || !data) {
+        const q = store.questions.find((item) => item.id === id);
+        if (q) return QuestionSchema.parse(q);
+        throw new Error(`Question ${id} not found`);
+      }
+
+      const row = data as QuestionRow;
+      return QuestionSchema.parse({
+        id: row.id,
+        topic: row.topic,
+        level: (row.level as 'Easy' | 'Medium' | 'Hard') || 'Medium',
+        title: row.title,
+        tags: row.tags || [],
+        hint1: row.hint1 || '',
+        hint2: row.hint2 || '',
+        explanation: row.explanation || undefined,
+        saved: false,
+        completed: false,
+        isDemo: Boolean(row.is_demo),
+      });
+    } catch {
       const q = store.questions.find((item) => item.id === id);
-      if (q) return q;
+      if (q) return QuestionSchema.parse(q);
       throw new Error(`Question ${id} not found`);
     }
-
-    const row = data as QuestionRow;
-    return {
-      id: row.id,
-      topic: row.topic,
-      level: row.level as 'Easy' | 'Medium' | 'Hard',
-      title: row.title,
-      tags: row.tags || [],
-      hint1: row.hint1,
-      hint2: row.hint2,
-      explanation: row.explanation || undefined,
-      isDemo: row.is_demo,
-    };
   }
 
   async toggleSave(id: string): Promise<boolean> {
@@ -133,40 +150,106 @@ export class SupabaseQuestionsRepo implements QuestionsRepo {
       return false;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return false;
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        const q = store.questions.find((item) => item.id === id);
+        if (q) {
+          q.saved = !q.saved;
+          store.saveQuestions();
+          return q.saved;
+        }
+        return false;
+      }
 
-    const { data: existing } = await supabase
-      .from('saved_questions')
-      .select('question_id')
-      .eq('user_id', user.id)
-      .eq('question_id', id)
-      .maybeSingle();
-
-    if (existing) {
-      await supabase
+      const { data: existing } = await supabase
         .from('saved_questions')
-        .delete()
+        .select('question_id')
         .eq('user_id', user.id)
-        .eq('question_id', id);
+        .eq('question_id', id)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from('saved_questions')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('question_id', id);
+        return false;
+      } else {
+        await supabase
+          .from('saved_questions')
+          .insert({ user_id: user.id, question_id: id });
+        return true;
+      }
+    } catch {
+      try {
+        offlineQueue.enqueue('toggle_save_question', { questionId: id });
+      } catch {}
+      const q = store.questions.find((item) => item.id === id);
+      if (q) {
+        q.saved = !q.saved;
+        store.saveQuestions();
+        return q.saved;
+      }
       return false;
-    } else {
-      await supabase
-        .from('saved_questions')
-        .insert({ user_id: user.id, question_id: id });
-      return true;
     }
   }
 
   async toggleComplete(id: string): Promise<boolean> {
-    const q = store.questions.find((item) => item.id === id);
-    if (q) {
-      q.completed = !q.completed;
-      store.saveQuestions();
-      return q.completed;
+    if (!isSupabaseConfigured()) {
+      const q = store.questions.find((item) => item.id === id);
+      if (q) {
+        q.completed = !q.completed;
+        store.saveQuestions();
+        return q.completed;
+      }
+      return false;
     }
-    return false;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        const q = store.questions.find((item) => item.id === id);
+        if (q) {
+          q.completed = !q.completed;
+          store.saveQuestions();
+          return q.completed;
+        }
+        return false;
+      }
+
+      const { data: existing } = await supabase
+        .from('saved_questions')
+        .select('done_at')
+        .eq('user_id', user.id)
+        .eq('question_id', id)
+        .maybeSingle();
+
+      const newDoneAt = existing?.done_at ? null : new Date().toISOString();
+      if (existing) {
+        await supabase
+          .from('saved_questions')
+          .update({ done_at: newDoneAt })
+          .eq('user_id', user.id)
+          .eq('question_id', id);
+      } else {
+        await supabase
+          .from('saved_questions')
+          .insert({ user_id: user.id, question_id: id, done_at: newDoneAt });
+      }
+      return Boolean(newDoneAt);
+    } catch {
+      try {
+        offlineQueue.enqueue('toggle_complete_question', { questionId: id });
+      } catch {}
+      const q = store.questions.find((item) => item.id === id);
+      if (q) {
+        q.completed = !q.completed;
+        store.saveQuestions();
+        return q.completed;
+      }
+      return false;
+    }
   }
 }

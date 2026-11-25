@@ -1,0 +1,68 @@
+name: PrepSphere Production CI Quality Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gates:
+    name: Lint, Contracts, Secrets & Unit Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Verify Secret Leaks (Zero-Leak Gate)
+        run: npm run check:secrets
+
+      - name: Verify Single-Source Contract Drift
+        run: npm run check:contracts
+
+      - name: Verify Database Schema & TypeScript Row Types
+        run: npm run db:types
+
+      - name: TypeScript Type Check
+        run: npm run typecheck
+
+      - name: Run Full Vitest Suite (Unit, Backend, Auth, Loop, Repos)
+        run: npm test
+
+      - name: Build Production Assets
+        run: npm run build
+
+  e2e-verification:
+    name: Playwright Journey & Accessibility Audit
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Build Production Bundle for Preview
+        run: npm run build
+
+      - name: Run Playwright Journey & Loop Regression Tests
+        run: npx playwright test e2e/interview-loop.spec.ts e2e/candidate-journey.spec.ts

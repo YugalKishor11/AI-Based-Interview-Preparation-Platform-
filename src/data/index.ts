@@ -46,3 +46,7 @@ export const progressRepo: ProgressRepo = isLiveBackend ? new SupabaseProgressRe
 export const interviewEngine: InterviewEngine = isLiveBackend ? new SupabaseInterviewEngine() : new MockInterviewEngine();
 
 export { isSupabaseConfigured, supabase };
+export * from './errors';
+export * from './offlineQueue';
+export * from './queries';
+export { callFn } from './supabase/callFn';

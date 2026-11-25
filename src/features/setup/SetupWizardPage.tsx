@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GlassCard } from '../../shared/ui/GlassCard';
 import { RgbBorder } from '../../shared/ui/RgbBorder';
@@ -6,7 +6,8 @@ import { Button } from '../../shared/ui/Button';
 import { Badge } from '../../shared/ui/Badge';
 import { Slider } from '../../shared/ui/Slider';
 import { ConsentPanel } from '../../shared/ui/SystemStates';
-import { sessionsRepo } from '../../data';
+import { sessionsRepo, isSupabaseConfigured } from '../../data';
+import { resumeService, ParsedResumeResult } from '../../data/resumes/resumeService';
 import {
   Layers,
   Code2,
@@ -60,33 +61,69 @@ export const SetupWizardPage: React.FC = () => {
   const [language, setLanguage] = useState('English');
   const [resumeFileName, setResumeFileName] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [parsedResume, setParsedResume] = useState<ParsedResumeResult | null>(null);
   const [consentAgreed, setConsentAgreed] = useState(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Autosave draft to localStorage
   useEffect(() => {
     try {
-      const draft = { type, role, level, difficulty, duration, questionCount, language };
+      const draft = {
+        type, role, level, difficulty, duration, questionCount, language, resumeFileName,
+        updatedAt: new Date().toISOString()
+      };
       localStorage.setItem(LS_DRAFT_KEY, JSON.stringify(draft));
     } catch {}
-  }, [type, role, level, difficulty, duration, questionCount, language]);
+  }, [type, role, level, difficulty, duration, questionCount, language, resumeFileName]);
 
   const estimatedCredits = Math.round((duration / 10) * 3 + (difficulty === 'Hard' ? 4 : 2));
 
-  // Resume mock upload simulation
-  const handleSimulateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Resume upload & parse pipeline
+  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setUploadError(null);
     setResumeFileName(file.name);
     setUploadProgress(10);
-    const interval = setInterval(() => {
-      setUploadProgress((p) => {
-        if (!p || p >= 100) {
-          clearInterval(interval);
-          return 100;
-        }
-        return p + 25;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const result = await resumeService.uploadAndParseResume(file, {
+        onProgress: (p) => setUploadProgress(p),
+        signal: controller.signal,
       });
-    }, 200);
+
+      setParsedResume(result);
+      setUploadProgress(100);
+      try {
+        localStorage.setItem('prepsphere_resume_summary', result.summary);
+        localStorage.setItem('prepsphere_resume_tech', JSON.stringify(result.technologies));
+      } catch {}
+    } catch (err: any) {
+      if (err?.message?.includes('cancelled')) {
+        setUploadProgress(null);
+        setResumeFileName(null);
+      } else {
+        setUploadError(err?.message || 'Failed to parse resume document.');
+        setUploadProgress(null);
+      }
+    }
+  };
+
+  const handleCancelUpload = () => {
+    abortControllerRef.current?.abort();
+    setResumeFileName(null);
+    setUploadProgress(null);
+    setUploadError(null);
+    setParsedResume(null);
+    try {
+      localStorage.removeItem('prepsphere_resume_summary');
+      localStorage.removeItem('prepsphere_resume_tech');
+    } catch {}
   };
 
   const handleProceedToInterviewer = () => {
@@ -333,14 +370,16 @@ export const SetupWizardPage: React.FC = () => {
               <div className="space-y-5">
                 <div className="flex items-center justify-between">
                   <h3 className="font-head text-lg font-bold text-txt">4. Upload Resume / Project Specs</h3>
-                  <Badge variant="demo">Demo Upload</Badge>
+                  <Badge variant={isSupabaseConfigured() ? 'ai' : 'demo'}>
+                    {isSupabaseConfigured() ? 'Private Storage' : 'Demo Upload'}
+                  </Badge>
                 </div>
 
                 <div className="p-8 border-2 border-dashed border-border/40 rounded-2xl text-center flex flex-col items-center justify-center bg-surface/40 hover:bg-surface/70 transition-colors relative">
                   <input
                     type="file"
                     accept=".pdf,.docx,.txt"
-                    onChange={handleSimulateUpload}
+                    onChange={handleResumeUpload}
                     className="absolute inset-0 opacity-0 cursor-pointer"
                   />
                   <div className="w-12 h-12 rounded-full bg-primary/20 text-primary flex items-center justify-center mb-3">
@@ -353,32 +392,60 @@ export const SetupWizardPage: React.FC = () => {
                     Extracted projects and metrics are parsed locally to seed tailored interviewer probing questions.
                   </p>
                   <span className="text-[10px] text-txt-muted font-mono">
-                    Supports PDF, DOCX, TXT up to 10MB
+                    Supports PDF, DOCX, TXT up to 5MB (Private encrypted bucket)
                   </span>
                 </div>
 
+                {uploadError && (
+                  <div className="p-3 rounded-xl bg-danger/10 border border-danger/25 text-xs text-danger flex items-center justify-between">
+                    <span>{uploadError}</span>
+                    <Button variant="ghost" size="sm" onClick={() => setUploadError(null)} className="text-xs">
+                      Dismiss
+                    </Button>
+                  </div>
+                )}
+
                 {resumeFileName && (
-                  <div className="p-3.5 rounded-xl bg-surface/80 border border-border/20 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <File className="w-5 h-5 text-primary" />
-                      <div>
-                        <div className="text-xs font-bold text-txt">{resumeFileName}</div>
-                        <div className="text-[10px] text-emerald-400 font-mono">
-                          {uploadProgress === 100 ? 'Parsed successfully (Demo)' : `Parsing ${uploadProgress}%...`}
+                  <div className="p-3.5 rounded-xl bg-surface/80 border border-border/20 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <File className="w-5 h-5 text-primary" />
+                        <div>
+                          <div className="text-xs font-bold text-txt">{resumeFileName}</div>
+                          <div className="text-[10px] text-emerald-400 font-mono">
+                            {uploadProgress === 100
+                              ? isSupabaseConfigured()
+                                ? 'Parsed and securely stored in private bucket'
+                                : 'Parsed successfully (Demo)'
+                              : `Uploading & Parsing ${uploadProgress}%...`}
+                          </div>
                         </div>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleCancelUpload}
+                        className="text-xs text-danger"
+                      >
+                        Remove
+                      </Button>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setResumeFileName(null);
-                        setUploadProgress(null);
-                      }}
-                      className="text-xs text-danger"
-                    >
-                      Remove
-                    </Button>
+
+                    {parsedResume && parsedResume.technologies.length > 0 && (
+                      <div className="pt-2 border-t border-border/15 flex flex-wrap gap-1.5 items-center">
+                        <span className="text-[10px] text-txt-muted uppercase font-bold tracking-wider mr-1">
+                          Extracted:
+                        </span>
+                        {parsedResume.technologies.slice(0, 6).map((tech) => (
+                          <span
+                            key={tech}
+                            className="px-2 py-0.5 rounded-md bg-primary/10 border border-primary/20 text-[10px] text-primary font-mono"
+                          >
+                            {tech}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

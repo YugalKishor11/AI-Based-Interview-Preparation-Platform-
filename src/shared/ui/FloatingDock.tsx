@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '../lib/cn';
 import {
   LayoutDashboard,
@@ -9,6 +10,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { RgbBorder } from './RgbBorder';
+import { prefetchRoute } from '../../data/queries';
 
 interface DockItem {
   to: string;
@@ -27,6 +29,12 @@ const DOCK_ITEMS: DockItem[] = [
 
 export const FloatingDock: React.FC = () => {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+
+  const handleHoverStart = (idx: number, to: string) => {
+    setHoveredIdx(idx);
+    prefetchRoute(queryClient, to);
+  };
 
   return (
     <>
@@ -49,7 +57,7 @@ export const FloatingDock: React.FC = () => {
                 <RgbBorder key={item.to} className="rounded-full">
                   <NavLink
                     to={item.to}
-                    onMouseEnter={() => setHoveredIdx(idx)}
+                    onMouseEnter={() => handleHoverStart(idx, item.to)}
                     onMouseLeave={() => setHoveredIdx(null)}
                     className={({ isActive }) =>
                       cn(
@@ -72,7 +80,7 @@ export const FloatingDock: React.FC = () => {
                 key={item.to}
                 to={item.to}
                 end={item.to === '/app'}
-                onMouseEnter={() => setHoveredIdx(idx)}
+                onMouseEnter={() => handleHoverStart(idx, item.to)}
                 onMouseLeave={() => setHoveredIdx(null)}
                 className={({ isActive }) =>
                   cn('dock-item group', isActive && 'active')

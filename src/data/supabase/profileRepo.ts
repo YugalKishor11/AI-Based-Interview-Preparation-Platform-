@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from './client';
 import { ProfileRepo } from '../repos/interfaces';
-import { Profile } from '../contracts';
+import { Profile, ProfileSchema } from '../contracts';
 import { mapProfileRowToProfile } from './authRepo';
 import { ProfileRow } from './types';
 import { store, MockProfileRepo } from '../mock';
@@ -8,30 +8,36 @@ import { store, MockProfileRepo } from '../mock';
 export class SupabaseProfileRepo implements ProfileRepo {
   async get(): Promise<Profile> {
     if (!isSupabaseConfigured()) {
-      return store.profile;
+      return ProfileSchema.parse(store.profile);
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return store.profile;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return ProfileSchema.parse(store.profile);
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (error || !data) {
+        return ProfileSchema.parse(mapProfileRowToProfile({ id: user.id }, user.email, false));
+      }
+
+      return ProfileSchema.parse(mapProfileRowToProfile(data, user.email, false));
+    } catch {
+      return ProfileSchema.parse(store.profile);
     }
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (error || !data) {
-      return mapProfileRowToProfile({ id: user.id }, user.email, false);
-    }
-
-    return mapProfileRowToProfile(data, user.email, false);
   }
 
   async update(p: Partial<Profile>): Promise<Profile> {
     if (!isSupabaseConfigured()) {
-      return store.profile;
+      store.profile = { ...store.profile, ...p };
+      store.saveProfile();
+      return ProfileSchema.parse(store.profile);
     }
 
     try {
@@ -49,7 +55,7 @@ export class SupabaseProfileRepo implements ProfileRepo {
           ...(p.onboardingCompleted !== undefined ? { onboardingCompleted: p.onboardingCompleted } : {}),
         };
         store.saveProfile();
-        return store.profile;
+        return ProfileSchema.parse(store.profile);
       }
 
       const updates: Partial<ProfileRow> = {};
@@ -71,18 +77,16 @@ export class SupabaseProfileRepo implements ProfileRepo {
         .single();
 
       if (error || !data) {
-        console.warn('Supabase profile update warning:', error?.message);
         store.profile = { ...store.profile, ...p };
         store.saveProfile();
-        return store.profile;
+        return ProfileSchema.parse(store.profile);
       }
 
-      return mapProfileRowToProfile(data, user.email, false);
-    } catch (err) {
-      console.warn('Supabase profile update fallback:', err);
+      return ProfileSchema.parse(mapProfileRowToProfile(data, user.email, false));
+    } catch {
       store.profile = { ...store.profile, ...p };
       store.saveProfile();
-      return store.profile;
+      return ProfileSchema.parse(store.profile);
     }
   }
 
@@ -92,18 +96,25 @@ export class SupabaseProfileRepo implements ProfileRepo {
       return;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // Call Supabase Edge Function delete-account or cascade delete user's data
     try {
-      await supabase.functions.invoke('delete-account', {
-        body: { confirmed: true },
-      });
-    } catch {
-      // Direct cascade cleanup if function not deployed
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Audit deletion entry
+      try {
+        await supabase.from('deletion_audit').insert({
+          kind: 'data',
+          counts: { user_id: user.id },
+          completed_at: new Date().toISOString(),
+        });
+      } catch {}
+
+      // 2. Cascade delete database records
       await supabase.from('interview_sessions').delete().eq('user_id', user.id);
       await supabase.from('saved_questions').delete().eq('user_id', user.id);
+      store.resetAll();
+    } catch {
+      store.resetAll();
     }
   }
 
@@ -112,34 +123,30 @@ export class SupabaseProfileRepo implements ProfileRepo {
       return new MockProfileRepo().exportData();
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      throw new Error('Not authenticated');
-    }
-
-    // Try edge function first
     try {
-      const { data } = await supabase.functions.invoke('export-data');
-      if (data) return JSON.stringify(data, null, 2);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return new MockProfileRepo().exportData();
+      }
+
+      const [profileRes, sessionsRes, questionsRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', user.id).single(),
+        supabase.from('interview_sessions').select('*').eq('user_id', user.id),
+        supabase.from('saved_questions').select('question_id').eq('user_id', user.id),
+      ]);
+
+      return JSON.stringify(
+        {
+          profile: profileRes.data || store.profile,
+          sessions: sessionsRes.data || store.sessions,
+          savedQuestionIds: questionsRes.data || [],
+          exportedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      );
     } catch {
-      // Fallback: direct table queries
+      return new MockProfileRepo().exportData();
     }
-
-    const [profileRes, sessionsRes, questionsRes] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', user.id).single(),
-      supabase.from('interview_sessions').select('*').eq('user_id', user.id),
-      supabase.from('saved_questions').select('question_id').eq('user_id', user.id),
-    ]);
-
-    return JSON.stringify(
-      {
-        profile: profileRes.data,
-        sessions: sessionsRes.data || [],
-        savedQuestionIds: questionsRes.data || [],
-        exportedAt: new Date().toISOString(),
-      },
-      null,
-      2
-    );
   }
 }

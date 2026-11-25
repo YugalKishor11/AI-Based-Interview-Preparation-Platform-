@@ -1,82 +1,110 @@
 import { supabase, isSupabaseConfigured } from './client';
 import { SessionsRepo } from '../repos/interfaces';
-import { Session, InterviewPlan, Report } from '../contracts';
+import { Session, SessionSchema, InterviewPlan, Report, ReportSchema } from '../contracts';
 import { SessionRow } from './types';
 import { store } from '../mock';
+import { mapReportRow } from './reportsRepo';
 
 function mapSessionRow(row: SessionRow): Session {
-  return {
+  const session: Session = {
     id: row.id,
-    title: row.title,
-    type: row.type,
-    personaId: row.persona_id,
+    title: row.title || 'Technical Interview Simulation',
+    type: row.type || 'System Design',
+    personaId: row.persona_id || 'p4',
     score: row.score ?? 80,
-    durationMins: row.duration_mins,
-    date: row.session_date,
+    durationMins: row.duration_mins || 30,
+    date: row.session_date || 'Recent',
     daysAgo: 0,
     reportId: `rep-${row.id}`,
-    isDemo: row.demo_mode,
+    isDemo: Boolean(row.demo_mode),
   };
+  return SessionSchema.parse(session);
+}
+
+function filterSessions(list: Session[], params?: { q?: string; type?: string; limit?: number }): Session[] {
+  let result = [...list];
+  if (params?.type && params.type !== 'all') {
+    const t = params.type.toLowerCase();
+    result = result.filter((s) => s.type.toLowerCase().includes(t));
+  }
+  if (params?.q) {
+    const q = params.q.toLowerCase();
+    result = result.filter((s) => s.title.toLowerCase().includes(q));
+  }
+  if (params?.limit) {
+    result = result.slice(0, params.limit);
+  }
+  return result;
 }
 
 export class SupabaseSessionsRepo implements SessionsRepo {
   async list(params?: { q?: string; type?: string; limit?: number }): Promise<Session[]> {
     if (!isSupabaseConfigured()) {
-      return store.sessions;
+      return filterSessions(store.sessions.map((s) => SessionSchema.parse(s)), params);
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return store.sessions;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return filterSessions(store.sessions.map((s) => SessionSchema.parse(s)), params);
+      }
+
+      let query = supabase
+        .from('interview_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (params?.type && params.type !== 'all') {
+        query = query.ilike('type', `%${params.type}%`);
+      }
+
+      if (params?.q) {
+        query = query.ilike('title', `%${params.q}%`);
+      }
+
+      if (params?.limit) {
+        query = query.limit(params.limit);
+      }
+
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        // Fallback to store if DB has no sessions yet
+        return filterSessions(store.sessions.map((s) => SessionSchema.parse(s)), params);
+      }
+
+      return filterSessions((data as SessionRow[]).map(mapSessionRow), params);
+    } catch {
+      return filterSessions(store.sessions.map((s) => SessionSchema.parse(s)), params);
     }
-
-    let query = supabase
-      .from('interview_sessions')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (params?.type && params.type !== 'all') {
-      query = query.ilike('type', `%${params.type}%`);
-    }
-
-    if (params?.q) {
-      query = query.ilike('title', `%${params.q}%`);
-    }
-
-    if (params?.limit) {
-      query = query.limit(params.limit);
-    }
-
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) {
-      // Fallback to store if DB has no sessions yet
-      return store.sessions;
-    }
-
-    return (data as SessionRow[]).map(mapSessionRow);
   }
 
   async get(id: string): Promise<Session> {
     if (!isSupabaseConfigured()) {
       const s = store.sessions.find((item) => item.id === id);
       if (!s) throw new Error(`Session ${id} not found`);
-      return s;
+      return SessionSchema.parse(s);
     }
 
-    const { data, error } = await supabase
-      .from('interview_sessions')
-      .select('*')
-      .eq('id', id)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('interview_sessions')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-    if (error || !data) {
+      if (error || !data) {
+        const s = store.sessions.find((item) => item.id === id);
+        if (s) return SessionSchema.parse(s);
+        throw new Error(`Session ${id} not found: ${error?.message}`);
+      }
+
+      return mapSessionRow(data as SessionRow);
+    } catch {
       const s = store.sessions.find((item) => item.id === id);
-      if (s) return s;
-      throw new Error(`Session ${id} not found: ${error?.message}`);
+      if (s) return SessionSchema.parse(s);
+      throw new Error(`Session ${id} not found`);
     }
-
-    return mapSessionRow(data as SessionRow);
   }
 
   async create(plan: InterviewPlan, personaId: string): Promise<Session> {
@@ -96,12 +124,28 @@ export class SupabaseSessionsRepo implements SessionsRepo {
       };
       store.sessions.unshift(newSession);
       store.saveSessions();
-      return newSession;
+      return SessionSchema.parse(newSession);
     }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      throw new Error('Candidate must be authenticated to create a session.');
+      // Create guest/demo session in store if unauthenticated
+      const newId = `s-${Date.now()}`;
+      const newSession: Session = {
+        id: newId,
+        title: `${plan.targetRole} (${plan.type})`,
+        type: plan.type,
+        personaId,
+        score: 82,
+        durationMins: plan.durationMinutes,
+        date: 'Just now',
+        daysAgo: 0,
+        reportId: `rep-${newId}`,
+        isDemo: true,
+      };
+      store.sessions.unshift(newSession);
+      store.saveSessions();
+      return SessionSchema.parse(newSession);
     }
 
     const newId = `s-${Date.now()}`;
@@ -126,7 +170,7 @@ export class SupabaseSessionsRepo implements SessionsRepo {
       .single();
 
     if (error || !data) {
-      // Fallback to mock session
+      // Fallback to local session
       const fallbackSession: Session = {
         id: newId,
         title: `${plan.targetRole} (${plan.type})`,
@@ -139,7 +183,9 @@ export class SupabaseSessionsRepo implements SessionsRepo {
         reportId: `rep-${newId}`,
         isDemo: false,
       };
-      return fallbackSession;
+      store.sessions.unshift(fallbackSession);
+      store.saveSessions();
+      return SessionSchema.parse(fallbackSession);
     }
 
     return mapSessionRow(data as SessionRow);
@@ -147,7 +193,8 @@ export class SupabaseSessionsRepo implements SessionsRepo {
 
   async complete(id: string): Promise<Report> {
     if (!isSupabaseConfigured()) {
-      return store.reports[`rep-${id}`] || store.reports['rep-101'];
+      const rep = store.reports[`rep-${id}`] || store.reports['rep-101'];
+      return ReportSchema.parse(rep);
     }
 
     await supabase
@@ -162,9 +209,14 @@ export class SupabaseSessionsRepo implements SessionsRepo {
       .maybeSingle();
 
     if (data) {
-      return data as unknown as Report;
+      try {
+        return mapReportRow(data);
+      } catch {
+        // Continue to fallback
+      }
     }
 
-    return store.reports[`rep-${id}`] || store.reports['rep-101'];
+    const rep = store.reports[`rep-${id}`] || store.reports['rep-101'];
+    return ReportSchema.parse(rep);
   }
 }
