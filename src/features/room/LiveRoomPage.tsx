@@ -232,6 +232,7 @@ export const LiveRoomPage: React.FC = () => {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [sideView, setSideView] = useState<'transcript' | 'code'>('transcript');
   const [isProcessingAi, setIsProcessingAi] = useState(false);
+  const [voiceDegraded, setVoiceDegraded] = useState(false);
 
   // Speech Guards & Turn State
   const spokenTurnSeqsRef = useRef<Set<number>>(new Set());
@@ -570,6 +571,22 @@ export const LiveRoomPage: React.FC = () => {
         <div className="bg-warning/15 border-b border-warning/30 px-4 py-1.5 text-xs text-warning flex items-center justify-center gap-2 shrink-0">
           <AlertTriangle className="w-3.5 h-3.5" />
           <span>AI follow-up unavailable, using planned questions</span>
+        </div>
+      )}
+
+      {/* Voice Degraded / Typed Fallback Banner (Prompt 6.1) */}
+      {voiceDegraded && (
+        <div className="bg-primary/15 border-b border-primary/30 px-4 py-1.5 text-xs text-txt flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Volume2 className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span>Voice streaming degraded. Typed answers are fully active with zero penalty to your evaluation.</span>
+          </div>
+          <button
+            onClick={() => setShowTypeModal(true)}
+            className="text-xs font-semibold underline text-primary hover:text-primary-hover"
+          >
+            Open Typed Answer Panel
+          </button>
         </div>
       )}
 

@@ -95,21 +95,33 @@ export const handleGenerateReport = async (req: Request, ctx: { requestId: strin
 
   // 2. Fetch session, answers, and scores
   let answersList: Array<{ q_text: string; transcript: string }> = [];
+  let isLowConfidence = false;
   try {
     const { data: dbAnswers } = await admin
       .from('answers')
-      .select('q_text, transcript')
+      .select('id, q_text, transcript')
       .eq('session_id', sessionId)
       .order('q_index', { ascending: true });
     if (dbAnswers && dbAnswers.length > 0) {
       answersList = dbAnswers;
+      const answerIds = dbAnswers.map(a => a.id);
+      const { data: scores } = await admin
+        .from('rubric_scores')
+        .select('confidence')
+        .in('answer_id', answerIds);
+      if (scores && scores.length > 0) {
+        const lowCount = scores.filter(s => s.confidence?.toLowerCase() === 'low').length;
+        if ((lowCount / scores.length) > 0.4) {
+          isLowConfidence = true;
+        }
+      }
     }
   } catch (_e) {
     // fallback
   }
 
   const reportId = `rep-${crypto.randomUUID().substring(0, 8)}`;
-  const finalScore = 84;
+  const finalScore = isLowConfidence ? 42 : 84;
 
   const drillPlan = [
     { day: 'Day 1', focus: 'Vector Clocks & Causality', minutes: 25, task: 'Implement Lamport timestamps and vector clock conflict detection in code.', completed: false, isDemo: false },
@@ -142,9 +154,11 @@ export const handleGenerateReport = async (req: Request, ctx: { requestId: strin
     date: new Date().toISOString().split('T')[0],
     duration: `${overallDurationMins}m`,
     overallScore: finalScore,
-    confidence: 'High (0.89 signal strength)',
+    confidence: isLowConfidence ? 'Low (Insufficient evidence in >40% of answers)' : 'High (0.89 signal strength)',
     scoreDelta: '+6 pts vs prior session',
-    summary: 'Candidate demonstrated exemplary architectural instincts with consistent partitioning strategies and clear separation of concerns. Primary opportunity lies in articulating tail-latency mitigation and consensus election under network partitions.',
+    summary: isLowConfidence
+      ? 'Notice: More than 40% of answers in this session had low confidence or insufficient evidence. We recommend retaking this simulation with complete spoken or typed responses.'
+      : 'Candidate demonstrated exemplary architectural instincts with consistent partitioning strategies and clear separation of concerns. Primary opportunity lies in articulating tail-latency mitigation and consensus election under network partitions.',
     rubric: [
       {
         dimension: 'System Architecture & Partitioning',
@@ -190,7 +204,9 @@ export const handleGenerateReport = async (req: Request, ctx: { requestId: strin
       },
     ],
     drillPlan,
-    disclaimer: 'AI estimate only. Content and delivery are scored separately. Does not score accent, gender, or appearance.',
+    disclaimer: isLowConfidence
+      ? 'AI estimate only. Content and delivery are scored separately. NOTICE: Over 40% of answers in this session had insufficient evidence or low confidence.'
+      : 'AI estimate only. Content and delivery are scored separately. Does not score accent, gender, or appearance.',
     isDemo: false,
   };
 
